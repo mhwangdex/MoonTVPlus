@@ -95,7 +95,6 @@ async function fetchWithTimeout(
 function getDoubanProxyConfig(): {
   proxyType:
   | 'direct'
-  | 'melody-cdn-sharon'
   | 'cors-proxy-zwei'
   | 'cmliussss-cdn-tencent'
   | 'cmliussss-cdn-ali'
@@ -106,7 +105,7 @@ function getDoubanProxyConfig(): {
   const doubanProxyType =
     localStorage.getItem('doubanDataSource') ||
     (window as any).RUNTIME_CONFIG?.DOUBAN_PROXY_TYPE ||
-    'melody-cdn-sharon';
+    'cmliussss-cdn-tencent';
   const doubanProxy =
     localStorage.getItem('doubanProxyUrl') ||
     (window as any).RUNTIME_CONFIG?.DOUBAN_PROXY ||
@@ -199,8 +198,6 @@ export async function getDoubanCategories(
   const { kind, category, type, pageLimit = 20, pageStart = 0 } = params;
   const { proxyType, proxyUrl } = getDoubanProxyConfig();
   switch (proxyType) {
-    case 'melody-cdn-sharon':
-      return fetchDoubanCategories(params, 'https://douban.ihtw.moe/');
     case 'cors-proxy-zwei':
       return fetchDoubanCategories(params, 'https://ciao-cors.is-an.org/');
     case 'cmliussss-cdn-tencent':
@@ -234,8 +231,6 @@ export async function getDoubanList(
   const { tag, type, pageLimit = 20, pageStart = 0 } = params;
   const { proxyType, proxyUrl } = getDoubanProxyConfig();
   switch (proxyType) {
-    case 'melody-cdn-sharon':
-      return fetchDoubanList(params, 'https://douban.ihtw.moe/');
     case 'cors-proxy-zwei':
       return fetchDoubanList(params, 'https://ciao-cors.is-an.org/');
     case 'cmliussss-cdn-tencent':
@@ -356,8 +351,6 @@ export async function getDoubanRecommends(
   } = params;
   const { proxyType, proxyUrl } = getDoubanProxyConfig();
   switch (proxyType) {
-    case 'melody-cdn-sharon':
-      return fetchDoubanRecommends(params, 'https://douban.ihtw.moe/');
     case 'cors-proxy-zwei':
       return fetchDoubanRecommends(params, 'https://ciao-cors.is-an.org/');
     case 'cmliussss-cdn-tencent':

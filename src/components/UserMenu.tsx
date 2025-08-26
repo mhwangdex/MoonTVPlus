@@ -67,8 +67,8 @@ export const UserMenu: React.FC = () => {
   const [enableOptimization, setEnableOptimization] = useState(true);
   const [fluidSearch, setFluidSearch] = useState(true);
   const [liveDirectConnect, setLiveDirectConnect] = useState(false);
-  const [doubanDataSource, setDoubanDataSource] = useState('melody-cdn-sharon');
-  const [doubanImageProxyType, setDoubanImageProxyType] = useState('melody-cdn-sharon');
+  const [doubanDataSource, setDoubanDataSource] = useState('cmliussss-cdn-tencent');
+  const [doubanImageProxyType, setDoubanImageProxyType] = useState('cmliussss-cdn-tencent');
   const [doubanImageProxyUrl, setDoubanImageProxyUrl] = useState('');
   const [isDoubanDropdownOpen, setIsDoubanDropdownOpen] = useState(false);
   const [isDoubanImageProxyDropdownOpen, setIsDoubanImageProxyDropdownOpen] =
@@ -77,7 +77,6 @@ export const UserMenu: React.FC = () => {
   // 豆瓣数据源选项
   const doubanDataSourceOptions = [
     { value: 'direct', label: '直连（服务器直接请求豆瓣）' },
-    { value: 'melody-cdn-sharon', label: '豆瓣 CDN By 旋律（Sharon CDN）' },
     { value: 'cors-proxy-zwei', label: 'Cors Proxy By Zwei' },
     {
       value: 'cmliussss-cdn-tencent',
@@ -92,7 +91,6 @@ export const UserMenu: React.FC = () => {
     { value: 'direct', label: '直连（浏览器直接请求豆瓣）' },
     { value: 'server', label: '服务器代理（由服务器代理请求豆瓣）' },
     { value: 'img3', label: '豆瓣官方精品 CDN（阿里云）' },
-    { value: 'melody-cdn-sharon', label: '豆瓣 CDN By 旋律（Sharon CDN）' },
     {
       value: 'cmliussss-cdn-tencent',
       label: '豆瓣 CDN By CMLiussss（腾讯云）',
@@ -140,7 +138,7 @@ export const UserMenu: React.FC = () => {
 
       const savedDoubanDataSource = localStorage.getItem('doubanDataSource');
       const defaultDoubanProxyType =
-        (window as any).RUNTIME_CONFIG?.DOUBAN_PROXY_TYPE || 'melody-cdn-sharon';
+        (window as any).RUNTIME_CONFIG?.DOUBAN_PROXY_TYPE || 'cmliussss-cdn-tencent';
       if (savedDoubanDataSource !== null) {
         setDoubanDataSource(savedDoubanDataSource);
       } else if (defaultDoubanProxyType) {
@@ -160,7 +158,7 @@ export const UserMenu: React.FC = () => {
         'doubanImageProxyType'
       );
       const defaultDoubanImageProxyType =
-        (window as any).RUNTIME_CONFIG?.DOUBAN_IMAGE_PROXY_TYPE || 'melody-cdn-sharon';
+        (window as any).RUNTIME_CONFIG?.DOUBAN_IMAGE_PROXY_TYPE || 'cmliussss-cdn-tencent';
       if (savedDoubanImageProxyType !== null) {
         setDoubanImageProxyType(savedDoubanImageProxyType);
       } else if (defaultDoubanImageProxyType) {
@@ -403,11 +401,6 @@ export const UserMenu: React.FC = () => {
   // 获取感谢信息
   const getThanksInfo = (dataSource: string) => {
     switch (dataSource) {
-      case 'melody-cdn-sharon':
-        return {
-          text: 'Thanks to @JohnsonRan',
-          url: 'https://github.com/JohnsonRan',
-        };
       case 'cors-proxy-zwei':
         return {
           text: 'Thanks to @Zwei',
@@ -426,11 +419,11 @@ export const UserMenu: React.FC = () => {
 
   const handleResetSettings = () => {
     const defaultDoubanProxyType =
-      (window as any).RUNTIME_CONFIG?.DOUBAN_PROXY_TYPE || 'melody-cdn-sharon';
+      (window as any).RUNTIME_CONFIG?.DOUBAN_PROXY_TYPE || 'cmliussss-cdn-tencent';
     const defaultDoubanProxy =
       (window as any).RUNTIME_CONFIG?.DOUBAN_PROXY || '';
     const defaultDoubanImageProxyType =
-      (window as any).RUNTIME_CONFIG?.DOUBAN_IMAGE_PROXY_TYPE || 'melody-cdn-sharon';
+      (window as any).RUNTIME_CONFIG?.DOUBAN_IMAGE_PROXY_TYPE || 'cmliussss-cdn-tencent';
     const defaultDoubanImageProxyUrl =
       (window as any).RUNTIME_CONFIG?.DOUBAN_IMAGE_PROXY || '';
     const defaultFluidSearch =

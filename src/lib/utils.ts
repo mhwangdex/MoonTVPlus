@@ -7,7 +7,6 @@ function getDoubanImageProxyConfig(): {
   | 'direct'
   | 'server'
   | 'img3'
-  | 'melody-cdn-sharon'
   | 'cmliussss-cdn-tencent'
   | 'cmliussss-cdn-ali'
   | 'custom';
@@ -16,7 +15,7 @@ function getDoubanImageProxyConfig(): {
   const doubanImageProxyType =
     localStorage.getItem('doubanImageProxyType') ||
     (window as any).RUNTIME_CONFIG?.DOUBAN_IMAGE_PROXY_TYPE ||
-    'melody-cdn-sharon';
+    'cmliussss-cdn-tencent';
   const doubanImageProxy =
     localStorage.getItem('doubanImageProxyUrl') ||
     (window as any).RUNTIME_CONFIG?.DOUBAN_IMAGE_PROXY ||
@@ -42,8 +41,6 @@ export function processImageUrl(originalUrl: string): string {
   switch (proxyType) {
     case 'server':
       return `/api/image-proxy?url=${encodeURIComponent(originalUrl)}`;
-    case 'melody-cdn-sharon':
-      return `https://douban.ihtw.moe/${encodeURIComponent(originalUrl)}`;
     case 'img3':
       return originalUrl.replace(/img\d+\.doubanio\.com/g, 'img3.doubanio.com');
     case 'cmliussss-cdn-tencent':

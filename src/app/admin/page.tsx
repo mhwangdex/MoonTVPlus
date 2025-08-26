@@ -3387,9 +3387,9 @@ const SiteConfigComponent = ({ config, refreshConfig }: { config: AdminConfig | 
     Announcement: '',
     SearchDownstreamMaxPage: 1,
     SiteInterfaceCacheTime: 7200,
-    DoubanProxyType: 'melody-cdn-sharon',
+    DoubanProxyType: 'cmliussss-cdn-tencent',
     DoubanProxy: '',
-    DoubanImageProxyType: 'melody-cdn-sharon',
+    DoubanImageProxyType: 'cmliussss-cdn-tencent',
     DoubanImageProxy: '',
     DisableYellowFilter: false,
     FluidSearch: true,
@@ -3403,7 +3403,6 @@ const SiteConfigComponent = ({ config, refreshConfig }: { config: AdminConfig | 
   // 豆瓣数据源选项
   const doubanDataSourceOptions = [
     { value: 'direct', label: '直连（服务器直接请求豆瓣）' },
-    { value: 'melody-cdn-sharon', label: '豆瓣 CDN By 旋律（Sharon CDN）' },
     { value: 'cors-proxy-zwei', label: 'Cors Proxy By Zwei' },
     {
       value: 'cmliussss-cdn-tencent',
@@ -3418,7 +3417,6 @@ const SiteConfigComponent = ({ config, refreshConfig }: { config: AdminConfig | 
     { value: 'direct', label: '直连（浏览器直接请求豆瓣）' },
     { value: 'server', label: '服务器代理（由服务器代理请求豆瓣）' },
     { value: 'img3', label: '豆瓣官方精品 CDN（阿里云）' },
-    { value: 'melody-cdn-sharon', label: '豆瓣 CDN By 旋律（Sharon CDN）' },
     {
       value: 'cmliussss-cdn-tencent',
       label: '豆瓣 CDN By CMLiussss（腾讯云）',
@@ -3430,11 +3428,6 @@ const SiteConfigComponent = ({ config, refreshConfig }: { config: AdminConfig | 
   // 获取感谢信息
   const getThanksInfo = (dataSource: string) => {
     switch (dataSource) {
-      case 'melody-cdn-sharon':
-        return {
-          text: 'Thanks to @JohnsonRan',
-          url: 'https://github.com/JohnsonRan',
-        };
       case 'cors-proxy-zwei':
         return {
           text: 'Thanks to @Zwei',
@@ -3455,10 +3448,10 @@ const SiteConfigComponent = ({ config, refreshConfig }: { config: AdminConfig | 
     if (config?.SiteConfig) {
       setSiteSettings({
         ...config.SiteConfig,
-        DoubanProxyType: config.SiteConfig.DoubanProxyType || 'melody-cdn-sharon',
+        DoubanProxyType: config.SiteConfig.DoubanProxyType || 'cmliussss-cdn-tencent',
         DoubanProxy: config.SiteConfig.DoubanProxy || '',
         DoubanImageProxyType:
-          config.SiteConfig.DoubanImageProxyType || 'melody-cdn-sharon',
+          config.SiteConfig.DoubanImageProxyType || 'cmliussss-cdn-tencent',
         DoubanImageProxy: config.SiteConfig.DoubanImageProxy || '',
         DisableYellowFilter: config.SiteConfig.DisableYellowFilter || false,
         FluidSearch: config.SiteConfig.FluidSearch || true,
