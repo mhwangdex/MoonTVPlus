@@ -41,6 +41,7 @@ export async function POST(request: NextRequest) {
       FluidSearch,
       DanmakuApiBase,
       DanmakuApiToken,
+      EnableComments,
     } = body as {
       SiteName: string;
       Announcement: string;
@@ -54,6 +55,7 @@ export async function POST(request: NextRequest) {
       FluidSearch: boolean;
       DanmakuApiBase: string;
       DanmakuApiToken: string;
+      EnableComments: boolean;
     };
 
     // 参数校验
@@ -69,7 +71,8 @@ export async function POST(request: NextRequest) {
       typeof DisableYellowFilter !== 'boolean' ||
       typeof FluidSearch !== 'boolean' ||
       typeof DanmakuApiBase !== 'string' ||
-      typeof DanmakuApiToken !== 'string'
+      typeof DanmakuApiToken !== 'string' ||
+      typeof EnableComments !== 'boolean'
     ) {
       return NextResponse.json({ error: '参数格式错误' }, { status: 400 });
     }
@@ -101,6 +104,7 @@ export async function POST(request: NextRequest) {
       FluidSearch,
       DanmakuApiBase,
       DanmakuApiToken,
+      EnableComments,
     };
 
     // 写入数据库

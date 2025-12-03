@@ -221,6 +221,8 @@ async function getInitConfig(configFile: string, subConfig: {
       // 弹幕配置
       DanmakuApiBase: process.env.DANMAKU_API_BASE || 'http://localhost:9321',
       DanmakuApiToken: process.env.DANMAKU_API_TOKEN || '87654321',
+      // 评论功能开关
+      EnableComments: false,
     },
     UserConfig: {
       Users: [],
@@ -332,6 +334,7 @@ export function configSelfCheck(adminConfig: AdminConfig): AdminConfig {
       FluidSearch: true,
       DanmakuApiBase: 'http://localhost:9321',
       DanmakuApiToken: '87654321',
+      EnableComments: false,
     };
   }
   // 确保弹幕配置存在
@@ -340,6 +343,10 @@ export function configSelfCheck(adminConfig: AdminConfig): AdminConfig {
   }
   if (!adminConfig.SiteConfig.DanmakuApiToken) {
     adminConfig.SiteConfig.DanmakuApiToken = '87654321';
+  }
+  // 确保评论开关存在
+  if (adminConfig.SiteConfig.EnableComments === undefined) {
+    adminConfig.SiteConfig.EnableComments = false;
   }
   if (!adminConfig.UserConfig) {
     adminConfig.UserConfig = { Users: [] };

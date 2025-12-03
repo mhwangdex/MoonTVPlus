@@ -11,6 +11,19 @@ export interface ChangelogEntry {
 
 export const changelog: ChangelogEntry[] = [
 	{
+    version: "200.1.0",
+    date: "2025-12-03",
+    added: [
+    ],
+    changed: [
+		"评论抓取功能更改为懒加载",
+		"评论抓取功能增加开关，默认为关闭",
+    ],
+    fixed: [
+      "修复播放页500错误"
+	]
+	},
+	{
     version: "200.0.0",
     date: "2025-12-02",
     added: [

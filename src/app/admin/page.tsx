@@ -269,6 +269,7 @@ interface SiteConfig {
   FluidSearch: boolean;
   DanmakuApiBase: string;
   DanmakuApiToken: string;
+  EnableComments: boolean;
 }
 
 // 视频源数据类型
@@ -3384,6 +3385,7 @@ const ConfigFileComponent = ({ config, refreshConfig }: { config: AdminConfig | 
 const SiteConfigComponent = ({ config, refreshConfig }: { config: AdminConfig | null; refreshConfig: () => Promise<void> }) => {
   const { alertModal, showAlert, hideAlert } = useAlertModal();
   const { isLoading, withLoading } = useLoadingState();
+  const [showEnableCommentsModal, setShowEnableCommentsModal] = useState(false);
   const [siteSettings, setSiteSettings] = useState<SiteConfig>({
     SiteName: '',
     Announcement: '',
@@ -3397,6 +3399,7 @@ const SiteConfigComponent = ({ config, refreshConfig }: { config: AdminConfig | 
     FluidSearch: true,
     DanmakuApiBase: 'http://localhost:9321',
     DanmakuApiToken: '87654321',
+    EnableComments: false,
   });
 
   // 豆瓣数据源相关状态
@@ -3461,6 +3464,7 @@ const SiteConfigComponent = ({ config, refreshConfig }: { config: AdminConfig | 
         FluidSearch: config.SiteConfig.FluidSearch || true,
         DanmakuApiBase: config.SiteConfig.DanmakuApiBase || 'http://localhost:9321',
         DanmakuApiToken: config.SiteConfig.DanmakuApiToken || '87654321',
+        EnableComments: config.SiteConfig.EnableComments || false,
       });
     }
   }, [config]);
@@ -3514,6 +3518,29 @@ const SiteConfigComponent = ({ config, refreshConfig }: { config: AdminConfig | 
       ...prev,
       DoubanImageProxyType: value,
     }));
+  };
+
+  // 处理评论开关变化
+  const handleCommentsToggle = (checked: boolean) => {
+    if (checked) {
+      // 如果要开启评论，弹出确认框
+      setShowEnableCommentsModal(true);
+    } else {
+      // 直接关闭评论
+      setSiteSettings((prev) => ({
+        ...prev,
+        EnableComments: false,
+      }));
+    }
+  };
+
+  // 确认开启评论
+  const handleConfirmEnableComments = () => {
+    setSiteSettings((prev) => ({
+      ...prev,
+      EnableComments: true,
+    }));
+    setShowEnableCommentsModal(false);
   };
 
   // 保存站点配置
@@ -3964,6 +3991,40 @@ const SiteConfigComponent = ({ config, refreshConfig }: { config: AdminConfig | 
         </div>
       </div>
 
+      {/* 评论功能配置 */}
+      <div className='space-y-4 pt-4 border-t border-gray-200 dark:border-gray-700'>
+        <h3 className='text-sm font-semibold text-gray-900 dark:text-gray-100'>
+          评论配置
+        </h3>
+
+        {/* 开启评论 */}
+        <div>
+          <div className='flex items-center justify-between'>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+              开启评论
+            </label>
+            <button
+              type='button'
+              onClick={() => handleCommentsToggle(!siteSettings.EnableComments)}
+              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 ${siteSettings.EnableComments
+                ? buttonStyles.toggleOn
+                : buttonStyles.toggleOff
+                }`}
+            >
+              <span
+                className={`inline-block h-4 w-4 transform rounded-full ${buttonStyles.toggleThumb} transition-transform ${siteSettings.EnableComments
+                  ? buttonStyles.toggleThumbOn
+                  : buttonStyles.toggleThumbOff
+                  }`}
+              />
+            </button>
+          </div>
+          <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
+            开启后将显示豆瓣评论。评论为逆向抓取，请自行承担责任。
+          </p>
+        </div>
+      </div>
+
       {/* 操作按钮 */}
       <div className='flex justify-end'>
         <button
@@ -3988,6 +4049,60 @@ const SiteConfigComponent = ({ config, refreshConfig }: { config: AdminConfig | 
         timer={alertModal.timer}
         showConfirm={alertModal.showConfirm}
       />
+
+      {/* 开启评论确认弹窗 */}
+      {showEnableCommentsModal && createPortal(
+        <div className='fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4' onClick={() => setShowEnableCommentsModal(false)}>
+          <div className='bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full' onClick={(e) => e.stopPropagation()}>
+            <div className='p-6'>
+              <div className='flex items-center justify-between mb-6'>
+                <h3 className='text-xl font-semibold text-gray-900 dark:text-gray-100'>
+                  开启评论功能
+                </h3>
+                <button
+                  onClick={() => setShowEnableCommentsModal(false)}
+                  className='text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors'
+                >
+                  <svg className='w-6 h-6' fill='none' stroke='currentColor' viewBox='0 0 24 24'>
+                    <path strokeLinecap='round' strokeLinejoin='round' strokeWidth={2} d='M6 18L18 6M6 6l12 12' />
+                  </svg>
+                </button>
+              </div>
+
+              <div className='mb-6'>
+                <div className='bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-4'>
+                  <div className='flex items-center space-x-2 mb-2'>
+                    <AlertTriangle className='w-5 h-5 text-yellow-600 dark:text-yellow-400' />
+                    <span className='text-sm font-medium text-yellow-800 dark:text-yellow-300'>
+                      重要提示
+                    </span>
+                  </div>
+                  <p className='text-sm text-yellow-700 dark:text-yellow-400'>
+                    评论功能为逆向抓取豆瓣评论数据，此功能仅供学习，开启后请自行承担相关责任和风险。
+                  </p>
+                </div>
+              </div>
+
+              {/* 操作按钮 */}
+              <div className='flex justify-end space-x-3'>
+                <button
+                  onClick={() => setShowEnableCommentsModal(false)}
+                  className={`px-6 py-2.5 text-sm font-medium ${buttonStyles.secondary}`}
+                >
+                  取消
+                </button>
+                <button
+                  onClick={handleConfirmEnableComments}
+                  className={`px-6 py-2.5 text-sm font-medium ${buttonStyles.primary}`}
+                >
+                  我已知晓，确认开启
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
     </div>
   );
 };

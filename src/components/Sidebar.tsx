@@ -50,6 +50,9 @@ interface SidebarProps {
 declare global {
   interface Window {
     __sidebarCollapsed?: boolean;
+    RUNTIME_CONFIG?: {
+      EnableComments: boolean;
+    };
   }
 }
 
