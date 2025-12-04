@@ -15,7 +15,7 @@
  */
 
 import { getAuthInfoFromBrowserCookie } from './auth';
-import { SkipConfig } from './types';
+import { SkipConfig, DanmakuFilterConfig } from './types';
 
 // 全局错误触发函数
 function triggerGlobalError(message: string) {
@@ -66,6 +66,7 @@ interface UserCacheStore {
   favorites?: CacheData<Record<string, Favorite>>;
   searchHistory?: CacheData<string[]>;
   skipConfigs?: CacheData<Record<string, SkipConfig>>;
+  danmakuFilterConfig?: CacheData<DanmakuFilterConfig>;
 }
 
 // ---- 常量 ----
@@ -337,6 +338,32 @@ class HybridCacheManager {
 
     const userCache = this.getUserCache(username);
     userCache.skipConfigs = this.createCacheData(data);
+    this.saveUserCache(username, userCache);
+  }
+
+  /**
+   * 弹幕过滤配置缓存方法
+   */
+  getCachedDanmakuFilterConfig(): DanmakuFilterConfig | null {
+    const username = this.getCurrentUsername();
+    if (!username) return null;
+
+    const userCache = this.getUserCache(username);
+    const cached = userCache.danmakuFilterConfig;
+
+    if (cached && this.isCacheValid(cached)) {
+      return cached.data;
+    }
+
+    return null;
+  }
+
+  cacheDanmakuFilterConfig(data: DanmakuFilterConfig): void {
+    const username = this.getCurrentUsername();
+    if (!username) return;
+
+    const userCache = this.getUserCache(username);
+    userCache.danmakuFilterConfig = this.createCacheData(data);
     this.saveUserCache(username, userCache);
   }
 
@@ -1653,6 +1680,125 @@ export async function deleteSkipConfig(
   } catch (err) {
     console.error('删除跳过片头片尾配置失败:', err);
     triggerGlobalError('删除跳过片头片尾配置失败');
+    throw err;
+  }
+}
+
+// ---------------- 弹幕过滤配置相关 API ----------------
+
+/**
+ * 获取弹幕过滤配置。
+ * 数据库存储模式下使用混合缓存策略：优先返回缓存数据，后台异步同步最新数据。
+ */
+export async function getDanmakuFilterConfig(): Promise<DanmakuFilterConfig | null> {
+  // 服务器端渲染阶段直接返回空
+  if (typeof window === 'undefined') {
+    return null;
+  }
+
+  // 数据库存储模式：使用混合缓存策略（包括 redis 和 upstash）
+  if (STORAGE_TYPE !== 'localstorage') {
+    // 优先从缓存获取数据
+    const cachedData = cacheManager.getCachedDanmakuFilterConfig();
+
+    if (cachedData) {
+      // 返回缓存数据，同时后台异步更新
+      fetchFromApi<DanmakuFilterConfig>(`/api/danmaku-filter`)
+        .then((freshData) => {
+          // 只有数据真正不同时才更新缓存
+          if (JSON.stringify(cachedData) !== JSON.stringify(freshData)) {
+            cacheManager.cacheDanmakuFilterConfig(freshData);
+            // 触发数据更新事件
+            window.dispatchEvent(
+              new CustomEvent('danmakuFilterConfigUpdated', {
+                detail: freshData,
+              })
+            );
+          }
+        })
+        .catch((err) => {
+          console.warn('后台同步弹幕过滤配置失败:', err);
+        });
+
+      return cachedData;
+    } else {
+      // 缓存为空，直接从 API 获取并缓存
+      try {
+        const freshData = await fetchFromApi<DanmakuFilterConfig>(
+          `/api/danmaku-filter`
+        );
+        cacheManager.cacheDanmakuFilterConfig(freshData);
+        return freshData;
+      } catch (err) {
+        console.error('获取弹幕过滤配置失败:', err);
+        return null;
+      }
+    }
+  }
+
+  // localStorage 模式
+  try {
+    const raw = localStorage.getItem('moontv_danmaku_filter_config');
+    if (!raw) return null;
+    return JSON.parse(raw) as DanmakuFilterConfig;
+  } catch (err) {
+    console.error('读取弹幕过滤配置失败:', err);
+    triggerGlobalError('读取弹幕过滤配置失败');
+    return null;
+  }
+}
+
+/**
+ * 保存弹幕过滤配置。
+ * 数据库存储模式下使用乐观更新：先更新缓存，再异步同步到数据库。
+ */
+export async function saveDanmakuFilterConfig(
+  config: DanmakuFilterConfig
+): Promise<void> {
+  // 数据库存储模式：乐观更新策略（包括 redis 和 upstash）
+  if (STORAGE_TYPE !== 'localstorage') {
+    // 立即更新缓存
+    cacheManager.cacheDanmakuFilterConfig(config);
+
+    // 触发立即更新事件
+    window.dispatchEvent(
+      new CustomEvent('danmakuFilterConfigUpdated', {
+        detail: config,
+      })
+    );
+
+    // 异步同步到数据库
+    try {
+      await fetchWithAuth('/api/danmaku-filter', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(config),
+      });
+    } catch (err) {
+      console.error('保存弹幕过滤配置失败:', err);
+      triggerGlobalError('保存弹幕过滤配置失败');
+    }
+    return;
+  }
+
+  // localStorage 模式
+  if (typeof window === 'undefined') {
+    console.warn('无法在服务端保存弹幕过滤配置到 localStorage');
+    return;
+  }
+
+  try {
+    localStorage.setItem('moontv_danmaku_filter_config', JSON.stringify(config));
+    window.dispatchEvent(
+      new CustomEvent('danmakuFilterConfigUpdated', {
+        detail: config,
+      })
+    );
+  } catch (err) {
+    console.error('保存弹幕过滤配置失败:', err);
+    triggerGlobalError('保存弹幕过滤配置失败');
     throw err;
   }
 }

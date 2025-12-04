@@ -4,23 +4,27 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Docker 标签'
+        description: '手动指定 Docker 标签'
         required: false
-        default: 'latest'
+        # dev 分支手动触发时，默认 tag 为 dev
+        default: 'dev'
         type: string
   push:
-    branches: [ dev ]
-  pull_request:
-    branches: [ dev ]
+    # 同时监听 main 和 dev 分支的推送
+    branches: [ main, dev ]
+  # 取消了 pull_request 触发，因为它通常不应该触发构建和推送镜像的操作
+  # 如果确实需要，可以重新加回来
+  # pull_request:
+  #   branches: [ dev ]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
-  contents: write
+  contents: read # 出于安全考虑，大部分步骤只需要 read 权限
   packages: write
-  actions: write
+  actions: write # cleanup-refresh 需要这个权限
 
 jobs:
   build:
@@ -31,8 +35,8 @@ jobs:
             os: ubuntu-latest
           - platform: linux/arm64
             os: ubuntu-24.04-arm
-    runs-on: ${{ matrix.os }}
 
+    runs-on: ${{ matrix.os }}
     steps:
       - name: Prepare platform name
         run: |
@@ -40,6 +44,19 @@ jobs:
 
       - name: Checkout source code
         uses: actions/checkout@v4
+
+      # 新增步骤：根据分支动态设置镜像名称
+      - name: Set image name based on branch
+        id: set_image_name
+        run: |
+          if [[ "${{ github.ref_name }}" == "main" ]]; then
+            echo "IMAGE_NAME=ghcr.io/${{ github.repository_owner }}/moontvplus" >> $GITHUB_ENV
+          elif [[ "${{ github.ref_name }}" == "dev" ]]; then
+            echo "IMAGE_NAME=ghcr.io/${{ github.repository_owner }}/moontvplus-dev" >> $GITHUB_ENV
+          else
+            # 为其他分支或手动触发设置一个默认值（可以根据需要调整）
+            echo "IMAGE_NAME=ghcr.io/${{ github.repository_owner }}/moontvplus-dev" >> $GITHUB_ENV
+          fi
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -50,19 +67,23 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Set lowercase repository owner
-        id: lowercase
-        run: echo "owner=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
-
+      
+      # 这个步骤不再需要，因为我们直接用 github.repository_owner
+      # - name: Set lowercase repository owner ...
+      
+      # 更改：使用动态镜像名和更强大的标签逻辑
       - name: Extract metadata
         id: meta
         uses: docker/metadata-action@v5
-
         with:
-          images: ghcr.io/mtvpls/moontvplus-dev
+          images: ${{ env.IMAGE_NAME }}
           tags: |
-            type=raw,value=${{ github.event.inputs.tag || 'latest' }},enable={{is_default_branch}}
+            # 1. 只有在手动触发时，才使用输入的 tag
+            type=raw,value=${{ inputs.tag }},enable=${{ github.event_name == 'workflow_dispatch' }}
+            # 2. 推送到分支时，使用分支名作为 tag (e.g., 'dev', 'main')
+            type=ref,event=branch
+            # 3. 只有当是默认分支(通常是main)时，才打 'latest' 标签
+            type=raw,value=latest,enable={{is_default_branch}}
 
       - name: Build and push by digest
         id: build
@@ -71,9 +92,11 @@ jobs:
           context: .
           file: ./Dockerfile
           platforms: ${{ matrix.platform }}
+          # 更改：使用 meta 步骤生成的标签和 labels
+          tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          tags: ghcr.io/mtvpls/moontvplus-dev:${{ github.event.inputs.tag || 'latest' }}
-          outputs: type=image,name=ghcr.io/mtvpls/moontvplus-dev,name-canonical=true,push=true
+          # 更改：使用动态镜像名
+          outputs: type=image,name=${{ env.IMAGE_NAME }},name-canonical=true,push=true
 
       - name: Export digest
         run: |
@@ -101,6 +124,29 @@ jobs:
           pattern: digests-*
           merge-multiple: true
 
+      # 新增步骤：在 merge 任务中也需要设置同样的镜像名称
+      - name: Set image name based on branch
+        id: set_image_name
+        run: |
+          if [[ "${{ github.ref_name }}" == "main" ]]; then
+            echo "IMAGE_NAME=ghcr.io/${{ github.repository_owner }}/moontvplus" >> $GITHUB_ENV
+          elif [[ "${{ github.ref_name }}" == "dev" ]]; then
+            echo "IMAGE_NAME=ghcr.io/${{ github.repository_owner }}/moontvplus-dev" >> $GITHUB_ENV
+          else
+            echo "IMAGE_NAME=ghcr.io/${{ github.repository_owner }}/moontvplus-dev" >> $GITHUB_ENV
+          fi
+
+      # 新增步骤：在 merge 任务中也需要生成同样的标签列表
+      - name: Extract metadata for manifest
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=${{ inputs.tag }},enable=${{ github.event_name == 'workflow_dispatch' }}
+            type=ref,event=branch
+            type=raw,value=latest,enable={{is_default_branch}}
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -111,15 +157,15 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Set lowercase repository owner
-        id: lowercase
-        run: echo "owner=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
-
       - name: Create manifest list and push
         working-directory: /tmp/digests
         run: |
-          docker buildx imagetools create -t ghcr.io/mtvpls/moontvplus-dev:${{ github.event.inputs.tag || 'latest' }} \
-            $(printf 'ghcr.io/mtvpls/moontvplus-dev@sha256:%s ' *)
+          # 更改：使用从 meta 生成的所有标签来创建 manifest
+          # 将逗号分隔的标签列表转换为 ' -t <tag1> -t <tag2> ...' 的格式
+          FORMATTED_TAGS=$(echo "${{ steps.meta.outputs.tags }}" | sed 's/,/ -t /g')
+          
+          docker buildx imagetools create -t $FORMATTED_TAGS \
+            $(printf '${{ env.IMAGE_NAME }}@sha256:%s ' *)
 
   cleanup-refresh:
     runs-on: ubuntu-latest

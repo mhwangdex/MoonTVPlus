@@ -378,6 +378,10 @@ export abstract class BaseRedisStorage implements IStorage {
     return `u:${user}:skip:${source}+${id}`;
   }
 
+  private danmakuFilterConfigKey(user: string) {
+    return `u:${user}:danmaku_filter`;
+  }
+
   async getSkipConfig(
     userName: string,
     source: string,
@@ -441,6 +445,34 @@ export abstract class BaseRedisStorage implements IStorage {
     });
 
     return configs;
+  }
+
+  // ---------- 弹幕过滤配置 ----------
+  async getDanmakuFilterConfig(
+    userName: string
+  ): Promise<import('./types').DanmakuFilterConfig | null> {
+    const val = await this.withRetry(() =>
+      this.client.get(this.danmakuFilterConfigKey(userName))
+    );
+    return val ? (JSON.parse(val) as import('./types').DanmakuFilterConfig) : null;
+  }
+
+  async setDanmakuFilterConfig(
+    userName: string,
+    config: import('./types').DanmakuFilterConfig
+  ): Promise<void> {
+    await this.withRetry(() =>
+      this.client.set(
+        this.danmakuFilterConfigKey(userName),
+        JSON.stringify(config)
+      )
+    );
+  }
+
+  async deleteDanmakuFilterConfig(userName: string): Promise<void> {
+    await this.withRetry(() =>
+      this.client.del(this.danmakuFilterConfigKey(userName))
+    );
   }
 
   // 清空所有数据

@@ -81,6 +81,14 @@ export interface IStorage {
   deleteSkipConfig(userName: string, source: string, id: string): Promise<void>;
   getAllSkipConfigs(userName: string): Promise<{ [key: string]: SkipConfig }>;
 
+  // 弹幕过滤配置相关
+  getDanmakuFilterConfig(userName: string): Promise<DanmakuFilterConfig | null>;
+  setDanmakuFilterConfig(
+    userName: string,
+    config: DanmakuFilterConfig
+  ): Promise<void>;
+  deleteDanmakuFilterConfig(userName: string): Promise<void>;
+
   // 数据清理相关
   clearAllData(): Promise<void>;
 }
@@ -121,4 +129,17 @@ export interface SkipConfig {
   enable: boolean; // 是否启用跳过片头片尾
   intro_time: number; // 片头时间（秒）
   outro_time: number; // 片尾时间（秒）
+}
+
+// 弹幕过滤规则数据结构
+export interface DanmakuFilterRule {
+  keyword: string; // 关键字
+  type: 'normal' | 'regex'; // 普通模式或正则模式
+  enabled: boolean; // 是否启用
+  id?: string; // 规则ID（用于前端管理）
+}
+
+// 弹幕过滤配置数据结构
+export interface DanmakuFilterConfig {
+  rules: DanmakuFilterRule[]; // 过滤规则列表
 }

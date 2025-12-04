@@ -3,7 +3,7 @@
 import { AdminConfig } from './admin.types';
 import { KvrocksStorage } from './kvrocks.db';
 import { RedisStorage } from './redis.db';
-import { Favorite, IStorage, PlayRecord, SkipConfig } from './types';
+import { Favorite, IStorage, PlayRecord, SkipConfig, DanmakuFilterConfig } from './types';
 import { UpstashRedisStorage } from './upstash.db';
 
 // storage type 常量: 'localstorage' | 'redis' | 'upstash'，默认 'localstorage'
@@ -229,6 +229,29 @@ export class DbManager {
       return (this.storage as any).getAllSkipConfigs(userName);
     }
     return {};
+  }
+
+  // ---------- 弹幕过滤配置 ----------
+  async getDanmakuFilterConfig(userName: string): Promise<DanmakuFilterConfig | null> {
+    if (typeof (this.storage as any).getDanmakuFilterConfig === 'function') {
+      return (this.storage as any).getDanmakuFilterConfig(userName);
+    }
+    return null;
+  }
+
+  async setDanmakuFilterConfig(
+    userName: string,
+    config: DanmakuFilterConfig
+  ): Promise<void> {
+    if (typeof (this.storage as any).setDanmakuFilterConfig === 'function') {
+      await (this.storage as any).setDanmakuFilterConfig(userName, config);
+    }
+  }
+
+  async deleteDanmakuFilterConfig(userName: string): Promise<void> {
+    if (typeof (this.storage as any).deleteDanmakuFilterConfig === 'function') {
+      await (this.storage as any).deleteDanmakuFilterConfig(userName);
+    }
   }
 
   // ---------- 数据清理 ----------

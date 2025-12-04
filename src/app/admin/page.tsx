@@ -3210,6 +3210,83 @@ const ConfigFileComponent = ({ config, refreshConfig }: { config: AdminConfig | 
     });
   };
 
+  // 处理文件上传
+  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    // 检查文件类型
+    if (!file.name.toLowerCase().endsWith('.json')) {
+      showError('请上传JSON格式的文件', showAlert);
+      return;
+    }
+
+    await withLoading('uploadConfig', async () => {
+      try {
+        const fileContent = await file.text();
+        
+        // 验证JSON格式
+        let parsedConfig;
+        try {
+          parsedConfig = JSON.parse(fileContent);
+        } catch (parseError) {
+          showError('JSON格式错误，请检查文件内容', showAlert);
+          return;
+        }
+
+        // 检查是否包含api_site字段
+        if (!parsedConfig.api_site) {
+          showError('配置文件必须包含api_site字段', showAlert);
+          return;
+        }
+
+        // 根据api字段进行去重
+        const existingConfig = configContent ? JSON.parse(configContent) : { api_site: {} };
+        const existingApis = new Set();
+        
+        // 收集现有配置中的所有api
+        Object.values(existingConfig.api_site || {}).forEach((site: any) => {
+          if (site.api) {
+            existingApis.add(site.api);
+          }
+        });
+
+        // 合并新配置，去重处理
+        const mergedApiSite = { ...existingConfig.api_site };
+        let duplicateCount = 0;
+        
+        Object.entries(parsedConfig.api_site || {}).forEach(([key, site]: [string, any]) => {
+          if (site.api && existingApis.has(site.api)) {
+            duplicateCount++;
+            // 跳过重复的api
+            return;
+          }
+          mergedApiSite[key] = site;
+        });
+
+        const mergedConfig = {
+          ...parsedConfig,
+          api_site: mergedApiSite
+        };
+
+        // 更新配置内容
+        setConfigContent(JSON.stringify(mergedConfig, null, 2));
+        
+        const message = duplicateCount > 0 
+          ? `配置上传成功，跳过了 ${duplicateCount} 个重复的API`
+          : '配置上传成功';
+        showSuccess(message, showAlert);
+
+      } catch (err) {
+        showError(err instanceof Error ? err.message : '文件上传失败', showAlert);
+        throw err;
+      }
+    });
+
+    // 清空文件输入
+    event.target.value = '';
+  };
+
   // 保存配置文件
   const handleSave = async () => {
     await withLoading('saveConfig', async () => {
@@ -3348,6 +3425,57 @@ const ConfigFileComponent = ({ config, refreshConfig }: { config: AdminConfig | 
             spellCheck={false}
             data-gramm={false}
           />
+        </div>
+
+        {/* 文件上传区域 */}
+        <div className='border-t border-gray-200 dark:border-gray-700 pt-4'>
+          <div className='flex items-center justify-between mb-3'>
+            <label className='text-sm font-medium text-gray-700 dark:text-gray-300'>
+              上传JSON配置文件
+            </label>
+            <div className='text-xs text-gray-500 dark:text-gray-400'>
+              支持根据API字段自动去重
+            </div>
+          </div>
+          <div className='relative'>
+            <input
+              type='file'
+              accept='.json'
+              onChange={handleFileUpload}
+              disabled={isLoading('uploadConfig')}
+              className='hidden'
+              id='json-file-upload'
+            />
+            <label
+              htmlFor='json-file-upload'
+              className={`flex items-center justify-center w-full px-4 py-3 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg cursor-pointer transition-colors ${
+                isLoading('uploadConfig')
+                  ? 'bg-gray-100 dark:bg-gray-800 cursor-not-allowed opacity-50'
+                  : 'bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 hover:border-gray-400 dark:hover:border-gray-500'
+              }`}
+            >
+              <div className='flex items-center space-x-2'>
+                {isLoading('uploadConfig') ? (
+                  <>
+                    <div className='w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin'></div>
+                    <span className='text-sm text-gray-600 dark:text-gray-400'>上传中...</span>
+                  </>
+                ) : (
+                  <>
+                    <svg className='w-5 h-5 text-gray-400' fill='none' stroke='currentColor' viewBox='0 0 24 24'>
+                      <path strokeLinecap='round' strokeLinejoin='round' strokeWidth={2} d='M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12' />
+                    </svg>
+                    <span className='text-sm text-gray-600 dark:text-gray-400'>
+                      点击选择JSON文件或拖拽到此处
+                    </span>
+                  </>
+                )}
+              </div>
+            </label>
+          </div>
+          <p className='mt-2 text-xs text-gray-500 dark:text-gray-400'>
+            上传的JSON配置将自动合并到当前配置，重复的API地址将被自动过滤
+          </p>
         </div>
 
         <div className='flex items-center justify-between'>

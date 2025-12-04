@@ -1,7 +1,7 @@
 /* eslint-disable react-hooks/exhaustive-deps, @typescript-eslint/no-explicit-any,@typescript-eslint/no-non-null-assertion,no-empty */
 'use client';
 
-import { ChevronUp, Search, X } from 'lucide-react';
+import { ChevronUp, RefreshCw, Search, X } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import React, { startTransition, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 
@@ -42,6 +42,52 @@ function SearchPageClient() {
   // 聚合卡片 refs 与聚合统计缓存
   const groupRefs = useRef<Map<string, React.RefObject<VideoCardHandle>>>(new Map());
   const groupStatsRef = useRef<Map<string, { douban_id?: number; episodes?: number; source_names: string[] }>>(new Map());
+  // 强制刷新状态
+  const [forceRefresh, setForceRefresh] = useState(false);
+  // 是否使用了缓存结果
+  const [isFromCache, setIsFromCache] = useState(false);
+
+  // 生成缓存键
+  const getCacheKey = (query: string) => {
+    return `search_cache_${query.trim()}`;
+  };
+
+  // 从 sessionStorage 获取缓存的搜索结果
+  const getCachedResults = (query: string): SearchResult[] | null => {
+    if (typeof window === 'undefined') return null;
+    try {
+      const cacheKey = getCacheKey(query);
+      const cached = sessionStorage.getItem(cacheKey);
+      if (cached) {
+        return JSON.parse(cached);
+      }
+    } catch (error) {
+      console.error('Failed to get cached results:', error);
+    }
+    return null;
+  };
+
+  // 保存搜索结果到 sessionStorage
+  const setCachedResults = (query: string, results: SearchResult[]) => {
+    if (typeof window === 'undefined') return;
+    try {
+      const cacheKey = getCacheKey(query);
+      sessionStorage.setItem(cacheKey, JSON.stringify(results));
+    } catch (error) {
+      console.error('Failed to cache results:', error);
+    }
+  };
+
+  // 清除指定查询的缓存
+  const clearCachedResults = (query: string) => {
+    if (typeof window === 'undefined') return;
+    try {
+      const cacheKey = getCacheKey(query);
+      sessionStorage.removeItem(cacheKey);
+    } catch (error) {
+      console.error('Failed to clear cached results:', error);
+    }
+  };
 
   const getGroupRef = (key: string) => {
     let ref = groupRefs.current.get(key);
@@ -407,6 +453,36 @@ function SearchPageClient() {
 
     if (query) {
       setSearchQuery(query);
+      
+      const trimmed = query.trim();
+      
+      // 检查是否有缓存且不是强制刷新
+      if (!forceRefresh) {
+        const cachedResults = getCachedResults(trimmed);
+        if (cachedResults && cachedResults.length > 0) {
+          // 使用缓存的结果
+          setIsLoading(false); // 先设置加载状态为 false
+          setSearchResults(cachedResults);
+          setShowResults(true);
+          setTotalSources(1);
+          setCompletedSources(1);
+          setShowSuggestions(false);
+          setIsFromCache(true); // 标记为缓存结果
+          // 保存到搜索历史
+          addSearchHistory(query);
+          return;
+        }
+      }
+      
+      // 如果是强制刷新，清除缓存
+      if (forceRefresh) {
+        clearCachedResults(trimmed);
+        setForceRefresh(false);
+      }
+      
+      // 开始新搜索时，重置缓存标记
+      setIsFromCache(false);
+      
       // 新搜索：关闭旧连接并清空结果
       if (eventSourceRef.current) {
         try { eventSourceRef.current.close(); } catch { }
@@ -423,8 +499,6 @@ function SearchPageClient() {
       }
       setIsLoading(true);
       setShowResults(true);
-
-      const trimmed = query.trim();
 
       // 每次搜索时重新读取设置，确保使用最新的配置
       let currentFluidSearch = useFluidSearch;
@@ -495,7 +569,18 @@ function SearchPageClient() {
                     flushTimerRef.current = null;
                   }
                   startTransition(() => {
-                    setSearchResults((prev) => prev.concat(toAppend));
+                    setSearchResults((prev) => {
+                      const newResults = prev.concat(toAppend);
+                      // 缓存完整的搜索结果
+                      setCachedResults(trimmed, newResults);
+                      return newResults;
+                    });
+                  });
+                } else {
+                  // 即使没有待写入的缓冲，也缓存当前结果
+                  setSearchResults((prev) => {
+                    setCachedResults(trimmed, prev);
+                    return prev;
                   });
                 }
                 setIsLoading(false);
@@ -542,6 +627,8 @@ function SearchPageClient() {
                   : (data.results as SearchResult[]);
 
               setSearchResults(results);
+              // 缓存搜索结果
+              setCachedResults(trimmed, results);
               setTotalSources(1);
               setCompletedSources(1);
             }
@@ -559,7 +646,7 @@ function SearchPageClient() {
       setShowResults(false);
       setShowSuggestions(false);
     }
-  }, [searchParams]);
+  }, [searchParams, forceRefresh]);
 
   // 组件卸载时，关闭可能存在的连接
   useEffect(() => {
@@ -603,7 +690,6 @@ function SearchPageClient() {
 
     // 回显搜索框
     setSearchQuery(trimmed);
-    setIsLoading(true);
     setShowResults(true);
     setShowSuggestions(false);
 
@@ -616,7 +702,6 @@ function SearchPageClient() {
     setShowSuggestions(false);
 
     // 自动执行搜索
-    setIsLoading(true);
     setShowResults(true);
 
     router.push(`/search?q=${encodeURIComponent(suggestion)}`);
@@ -685,7 +770,6 @@ function SearchPageClient() {
 
                   // 回显搜索框
                   setSearchQuery(trimmed);
-                  setIsLoading(true);
                   setShowResults(true);
                   setShowSuggestions(false);
 
@@ -701,20 +785,42 @@ function SearchPageClient() {
           {showResults ? (
             <section className='mb-12'>
               {/* 标题 */}
-              <div className='mb-4'>
+              <div className='mb-4 flex items-center justify-between'>
                 <h2 className='text-xl font-bold text-gray-800 dark:text-gray-200'>
                   搜索结果
-                  {totalSources > 0 && useFluidSearch && (
-                    <span className='ml-2 text-sm font-normal text-gray-500 dark:text-gray-400'>
-                      {completedSources}/{totalSources}
+                  {isFromCache ? (
+                    <span className='ml-2 px-2 py-0.5 text-xs font-medium text-green-600 bg-green-50 rounded-md dark:text-green-400 dark:bg-green-900/30'>
+                      缓存
                     </span>
-                  )}
-                  {isLoading && useFluidSearch && (
-                    <span className='ml-2 inline-block align-middle'>
-                      <span className='inline-block h-3 w-3 border-2 border-gray-300 border-t-green-500 rounded-full animate-spin'></span>
-                    </span>
+                  ) : (
+                    <>
+                      {totalSources > 0 && useFluidSearch && (
+                        <span className='ml-2 text-sm font-normal text-gray-500 dark:text-gray-400'>
+                          {completedSources}/{totalSources}
+                        </span>
+                      )}
+                      {isLoading && useFluidSearch && (
+                        <span className='ml-2 inline-block align-middle'>
+                          <span className='inline-block h-3 w-3 border-2 border-gray-300 border-t-green-500 rounded-full animate-spin'></span>
+                        </span>
+                      )}
+                    </>
                   )}
                 </h2>
+                {/* 强制刷新按钮 */}
+                {searchQuery && (
+                  <button
+                    onClick={() => {
+                      setForceRefresh(true);
+                    }}
+                    disabled={isLoading}
+                    className='flex items-center gap-1.5 px-3 py-1.5 text-sm text-gray-600 hover:text-green-600 hover:bg-green-50 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed dark:text-gray-400 dark:hover:text-green-400 dark:hover:bg-gray-700/50'
+                    aria-label='强制刷新搜索结果'
+                  >
+                    <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
+                    <span>刷新</span>
+                  </button>
+                )}
               </div>
               {/* 筛选器 + 聚合开关 同行 */}
               <div className='mb-8 flex items-center justify-between gap-3'>

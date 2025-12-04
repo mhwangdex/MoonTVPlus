@@ -19,6 +19,7 @@ import {
   savePlayRecord,
   saveSkipConfig,
   subscribeToDataUpdates,
+  getDanmakuFilterConfig,
 } from '@/lib/db.client';
 import {
   convertDanmakuFormat,
@@ -31,12 +32,14 @@ import {
   searchAnime,
 } from '@/lib/danmaku/api';
 import type { DanmakuAnime, DanmakuSelection, DanmakuSettings } from '@/lib/danmaku/types';
-import { SearchResult } from '@/lib/types';
+import { SearchResult, DanmakuFilterConfig } from '@/lib/types';
 import { getVideoResolutionFromM3u8, processImageUrl } from '@/lib/utils';
 
 import EpisodeSelector from '@/components/EpisodeSelector';
 import PageLayout from '@/components/PageLayout';
 import DoubanComments from '@/components/DoubanComments';
+import DanmakuFilterSettings from '@/components/DanmakuFilterSettings';
+import Toast, { ToastProps } from '@/components/Toast';
 import { useEnableComments } from '@/hooks/useEnableComments';
 
 // 扩展 HTMLVideoElement 类型以支持 hls 属性
@@ -168,6 +171,8 @@ function PlayPageClient() {
   const [danmakuSettings, setDanmakuSettings] = useState<DanmakuSettings>(
     loadDanmakuSettings()
   );
+  const [danmakuFilterConfig, setDanmakuFilterConfig] = useState<DanmakuFilterConfig | null>(null);
+  const danmakuFilterConfigRef = useRef<DanmakuFilterConfig | null>(null);
   const [currentDanmakuSelection, setCurrentDanmakuSelection] =
     useState<DanmakuSelection | null>(null);
   const [danmakuEpisodesList, setDanmakuEpisodesList] = useState<
@@ -181,10 +186,39 @@ function PlayPageClient() {
   // 多条弹幕匹配结果
   const [danmakuMatches, setDanmakuMatches] = useState<DanmakuAnime[]>([]);
   const [showDanmakuSourceSelector, setShowDanmakuSourceSelector] = useState(false);
+  const [showDanmakuFilterSettings, setShowDanmakuFilterSettings] = useState(false);
+  const [currentSearchKeyword, setCurrentSearchKeyword] = useState<string>(''); // 当前搜索使用的关键词
+  const [toast, setToast] = useState<ToastProps | null>(null);
 
   useEffect(() => {
     danmakuSettingsRef.current = danmakuSettings;
   }, [danmakuSettings]);
+
+  // 加载弹幕过滤配置
+  useEffect(() => {
+    const loadFilterConfig = async () => {
+      try {
+        const config = await getDanmakuFilterConfig();
+        if (config) {
+          setDanmakuFilterConfig(config);
+          danmakuFilterConfigRef.current = config;
+        } else {
+          // 如果没有配置，设置默认空配置
+          const defaultConfig: DanmakuFilterConfig = { rules: [] };
+          setDanmakuFilterConfig(defaultConfig);
+          danmakuFilterConfigRef.current = defaultConfig;
+        }
+      } catch (error) {
+        console.error('加载弹幕过滤配置失败:', error);
+      }
+    };
+    loadFilterConfig();
+  }, []);
+
+  // 同步弹幕过滤配置到ref
+  useEffect(() => {
+    danmakuFilterConfigRef.current = danmakuFilterConfig;
+  }, [danmakuFilterConfig]);
 
   // 视频基本信息
   const [videoTitle, setVideoTitle] = useState(searchParams.get('title') || '');
@@ -636,6 +670,9 @@ function PlayPageClient() {
   const initAnime4K = async () => {
     if (!artPlayerRef.current?.video) return;
 
+    let frameRequestId: number | null = null; // 在外层声明，以便错误处理中使用
+    let outputCanvas: HTMLCanvasElement | null = null; // 在外层声明，以便错误处理中清理
+
     try {
       if (anime4kRef.current) {
         anime4kRef.current.stop?.();
@@ -666,42 +703,138 @@ function PlayPageClient() {
         throw new Error('无法获取视频尺寸');
       }
 
-      const canvas = document.createElement('canvas');
+      // 检查视频是否正在播放
+      console.log('视频播放状态:', {
+        paused: video.paused,
+        ended: video.ended,
+        readyState: video.readyState,
+        currentTime: video.currentTime,
+      });
+
+      // 检测是否为Firefox
+      const isFirefox = navigator.userAgent.toLowerCase().includes('firefox');
+      console.log('浏览器检测:', isFirefox ? 'Firefox' : 'Chrome/Edge/其他');
+
+      // 创建输出canvas（显示给用户的）
+      outputCanvas = document.createElement('canvas');
       const container = artPlayerRef.current.template.$video.parentElement;
 
       // 使用用户选择的超分倍数
       const scale = anime4kScaleRef.current;
-      canvas.width = video.videoWidth * scale;
-      canvas.height = video.videoHeight * scale;
-      canvas.style.position = 'absolute';
-      canvas.style.top = '0';
-      canvas.style.left = '0';
-      canvas.style.width = '100%';
-      canvas.style.height = '100%';
-      canvas.style.objectFit = 'contain';
-      canvas.style.cursor = 'pointer';
+      outputCanvas.width = Math.floor(video.videoWidth * scale);  // 确保是整数
+      outputCanvas.height = Math.floor(video.videoHeight * scale);
 
-      // 在canvas上监听点击事件，触发播放器的暂停/播放切换
+      // 验证outputCanvas尺寸
+      console.log('outputCanvas尺寸:', outputCanvas.width, 'x', outputCanvas.height);
+      if (!outputCanvas.width || !outputCanvas.height ||
+          !isFinite(outputCanvas.width) || !isFinite(outputCanvas.height)) {
+        throw new Error(`outputCanvas尺寸无效: ${outputCanvas.width}x${outputCanvas.height}, scale: ${scale}`);
+      }
+
+      outputCanvas.style.position = 'absolute';
+      outputCanvas.style.top = '0';
+      outputCanvas.style.left = '0';
+      outputCanvas.style.width = '100%';
+      outputCanvas.style.height = '100%';
+      outputCanvas.style.objectFit = 'contain';
+      outputCanvas.style.cursor = 'pointer';
+      outputCanvas.style.zIndex = '1';
+      // 确保canvas背景透明，避免Firefox中的渲染问题
+      outputCanvas.style.backgroundColor = 'transparent';
+
+      // Firefox兼容性处理：创建中间canvas
+      let sourceCanvas: HTMLCanvasElement | null = null;
+      let sourceCtx: CanvasRenderingContext2D | null = null;
+
+      if (isFirefox) {
+        // Firefox的WebGPU不支持直接使用HTMLVideoElement
+        // 使用标准HTMLCanvasElement（更好的兼容性）
+        sourceCanvas = document.createElement('canvas');
+
+        // 获取视频尺寸并记录
+        const videoW = video.videoWidth;
+        const videoH = video.videoHeight;
+        console.log('Firefox：准备创建canvas - 视频尺寸:', videoW, 'x', videoH);
+
+        // 设置canvas尺寸
+        const canvasW = Math.floor(videoW);
+        const canvasH = Math.floor(videoH);
+        console.log('Firefox：计算后的canvas尺寸:', canvasW, 'x', canvasH);
+
+        sourceCanvas.width = canvasW;
+        sourceCanvas.height = canvasH;
+
+        // 立即验证赋值结果
+        console.log('Firefox：Canvas创建后立即检查:');
+        console.log('  - sourceCanvas.width:', sourceCanvas.width);
+        console.log('  - sourceCanvas.height:', sourceCanvas.height);
+        console.log('  - 赋值是否成功:', sourceCanvas.width === canvasW && sourceCanvas.height === canvasH);
+
+        // 验证sourceCanvas尺寸
+        if (!sourceCanvas.width || !sourceCanvas.height ||
+            !isFinite(sourceCanvas.width) || !isFinite(sourceCanvas.height)) {
+          throw new Error(`sourceCanvas尺寸无效: ${sourceCanvas.width}x${sourceCanvas.height}`);
+        }
+
+        if (sourceCanvas.width !== canvasW || sourceCanvas.height !== canvasH) {
+          throw new Error(`sourceCanvas尺寸赋值异常: 期望 ${canvasW}x${canvasH}, 实际 ${sourceCanvas.width}x${sourceCanvas.height}`);
+        }
+
+        sourceCtx = sourceCanvas.getContext('2d', {
+          willReadFrequently: true,
+          alpha: false  // 禁用alpha通道，提高性能
+        });
+
+        if (!sourceCtx) {
+          throw new Error('无法创建2D上下文');
+        }
+
+        // 先绘制一帧到canvas，确保有内容
+        if (video.readyState >= video.HAVE_CURRENT_DATA) {
+          sourceCtx.drawImage(video, 0, 0, sourceCanvas.width, sourceCanvas.height);
+          console.log('Firefox：已绘制初始帧到sourceCanvas');
+        }
+
+        console.log('Firefox检测：使用HTMLCanvasElement中转方案');
+      }
+
+      // 在outputCanvas上监听点击事件，触发播放器的暂停/播放切换
       const handleCanvasClick = () => {
         if (artPlayerRef.current) {
           artPlayerRef.current.toggle();
         }
       };
-      canvas.addEventListener('click', handleCanvasClick);
+      outputCanvas.addEventListener('click', handleCanvasClick);
 
-      // 在canvas上监听双击事件，触发全屏切换
+      // 在outputCanvas上监听双击事件，触发全屏切换
       const handleCanvasDblClick = () => {
         if (artPlayerRef.current) {
           artPlayerRef.current.fullscreen = !artPlayerRef.current.fullscreen;
         }
       };
-      canvas.addEventListener('dblclick', handleCanvasDblClick);
+      outputCanvas.addEventListener('dblclick', handleCanvasDblClick);
 
-      // 隐藏原始video元素
-      video.style.display = 'none';
+      // 隐藏原始video元素（使用opacity而不是display:none以保持视频解码）
+      // Firefox在display:none时可能会停止视频解码，导致黑屏
+      video.style.opacity = '0';
+      video.style.pointerEvents = 'none';
+      video.style.position = 'absolute';
+      video.style.zIndex = '-1';
 
-      // 插入canvas到容器
-      container.insertBefore(canvas, video);
+      // 插入outputCanvas到容器
+      container.insertBefore(outputCanvas, video);
+
+      // Firefox兼容性：创建视频帧捕获循环
+      if (isFirefox && sourceCtx && sourceCanvas) {
+        const captureVideoFrame = () => {
+          if (sourceCtx && sourceCanvas && video.readyState >= video.HAVE_CURRENT_DATA) {
+            sourceCtx.drawImage(video, 0, 0, sourceCanvas.width, sourceCanvas.height);
+          }
+          frameRequestId = requestAnimationFrame(captureVideoFrame);
+        };
+        captureVideoFrame();
+        console.log('Firefox：视频帧捕获循环已启动');
+      }
 
       // 动态导入 anime4k-webgpu 及对应的模式
       const { render: anime4kRender, ModeA, ModeB, ModeC, ModeAA, ModeBB, ModeCA } = await import('anime4k-webgpu');
@@ -733,28 +866,66 @@ function PlayPageClient() {
       }
 
       // 使用anime4k-webgpu的render函数
+      // Firefox使用sourceCanvas，其他浏览器直接使用video
       const renderConfig: any = {
-        video,
-        canvas,
+        video: isFirefox ? sourceCanvas : video, // Firefox使用canvas中转，其他浏览器直接使用video
+        canvas: outputCanvas,
         pipelineBuilder: (device: GPUDevice, inputTexture: GPUTexture) => {
+          if (!outputCanvas) {
+            throw new Error('outputCanvas is null in pipelineBuilder');
+          }
           const mode = new ModeClass({
             device,
             inputTexture,
             nativeDimensions: {
-              width: video.videoWidth,
-              height: video.videoHeight,
+              width: Math.floor(video.videoWidth),  // 确保是整数
+              height: Math.floor(video.videoHeight),
             },
             targetDimensions: {
-              width: canvas.width,
-              height: canvas.height,
+              width: Math.floor(outputCanvas.width),  // 确保是整数
+              height: Math.floor(outputCanvas.height),
             },
           });
           return [mode];
         },
       };
 
+      console.log('开始初始化Anime4K渲染器...');
+      console.log('输入源:', isFirefox ? 'HTMLCanvasElement (Firefox兼容)' : 'video (原生)');
+      console.log('视频尺寸:', video.videoWidth, 'x', video.videoHeight);
+      console.log('输出Canvas尺寸:', outputCanvas.width, 'x', outputCanvas.height);
+      console.log('nativeDimensions:', Math.floor(video.videoWidth), 'x', Math.floor(video.videoHeight));
+      console.log('targetDimensions:', Math.floor(outputCanvas.width), 'x', Math.floor(outputCanvas.height));
+
+      // Firefox调试：检查sourceCanvas状态
+      if (isFirefox && sourceCanvas) {
+        console.log('sourceCanvas详细信息:');
+        console.log('  - width:', sourceCanvas.width, 'height:', sourceCanvas.height);
+        console.log('  - clientWidth:', sourceCanvas.clientWidth, 'clientHeight:', sourceCanvas.clientHeight);
+        console.log('  - offsetWidth:', sourceCanvas.offsetWidth, 'offsetHeight:', sourceCanvas.offsetHeight);
+
+        // 尝试读取一个像素，确认canvas有内容
+        if (sourceCtx) {
+          try {
+            const imageData = sourceCtx.getImageData(0, 0, 1, 1);
+            console.log('  - 像素数据可读:', imageData.data.length > 0);
+          } catch (err) {
+            console.error('  - 无法读取像素数据:', err);
+          }
+        }
+      }
+
       const controller = await anime4kRender(renderConfig);
-      anime4kRef.current = { controller, canvas, handleCanvasClick, handleCanvasDblClick };
+      console.log('Anime4K渲染器初始化成功');
+
+      anime4kRef.current = {
+        controller,
+        canvas: outputCanvas,
+        sourceCanvas: isFirefox ? sourceCanvas : null,
+        frameRequestId: isFirefox ? frameRequestId : null,
+        handleCanvasClick,
+        handleCanvasDblClick,
+      };
 
       console.log('Anime4K超分已启用，模式:', anime4kModeRef.current, '倍数:', scale);
       if (artPlayerRef.current) {
@@ -765,9 +936,23 @@ function PlayPageClient() {
       if (artPlayerRef.current) {
         artPlayerRef.current.notice.show = '超分启用失败：' + (err instanceof Error ? err.message : '未知错误');
       }
+
+      // 停止帧捕获循环
+      if (frameRequestId) {
+        cancelAnimationFrame(frameRequestId);
+      }
+
+      // 移除outputCanvas（如果已创建）
+      if (outputCanvas && outputCanvas.parentNode) {
+        outputCanvas.parentNode.removeChild(outputCanvas);
+      }
+
       // 恢复video显示
       if (artPlayerRef.current?.video) {
-        artPlayerRef.current.video.style.display = 'block';
+        artPlayerRef.current.video.style.opacity = '1';
+        artPlayerRef.current.video.style.pointerEvents = 'auto';
+        artPlayerRef.current.video.style.position = '';
+        artPlayerRef.current.video.style.zIndex = '';
       }
     }
   };
@@ -776,6 +961,12 @@ function PlayPageClient() {
   const cleanupAnime4K = async () => {
     if (anime4kRef.current) {
       try {
+        // 停止帧捕获循环（仅Firefox）
+        if (anime4kRef.current.frameRequestId) {
+          cancelAnimationFrame(anime4kRef.current.frameRequestId);
+          console.log('Firefox：帧捕获循环已停止');
+        }
+
         // 停止渲染循环
         anime4kRef.current.controller?.stop?.();
 
@@ -794,11 +985,33 @@ function PlayPageClient() {
           anime4kRef.current.canvas.parentNode.removeChild(anime4kRef.current.canvas);
         }
 
+        // 清理sourceCanvas（仅Firefox）
+        if (anime4kRef.current.sourceCanvas) {
+          if (anime4kRef.current.sourceCanvas instanceof OffscreenCanvas) {
+            // OffscreenCanvas的清理
+            const ctx = anime4kRef.current.sourceCanvas.getContext('2d');
+            if (ctx) {
+              ctx.clearRect(0, 0, anime4kRef.current.sourceCanvas.width, anime4kRef.current.sourceCanvas.height);
+            }
+            console.log('Firefox：OffscreenCanvas已清理');
+          } else {
+            // HTMLCanvasElement的清理
+            const ctx = anime4kRef.current.sourceCanvas.getContext('2d');
+            if (ctx) {
+              ctx.clearRect(0, 0, anime4kRef.current.sourceCanvas.width, anime4kRef.current.sourceCanvas.height);
+            }
+            console.log('Firefox：HTMLCanvasElement已清理');
+          }
+        }
+
         anime4kRef.current = null;
 
         // 恢复原始video显示
         if (artPlayerRef.current?.video) {
-          artPlayerRef.current.video.style.display = 'block';
+          artPlayerRef.current.video.style.opacity = '1';
+          artPlayerRef.current.video.style.pointerEvents = 'auto';
+          artPlayerRef.current.video.style.position = '';
+          artPlayerRef.current.video.style.zIndex = '';
         }
 
         console.log('Anime4K已清理');
@@ -1420,13 +1633,14 @@ function PlayPageClient() {
   const handleDanmakuSelect = async (selection: DanmakuSelection) => {
     setCurrentDanmakuSelection(selection);
 
-    // 保存选择记忆
+    // 保存选择记忆（包含搜索关键词）
     saveDanmakuMemory(
       videoTitleRef.current,
       selection.animeId,
       selection.episodeId,
       selection.animeTitle,
-      selection.episodeTitle
+      selection.episodeTitle,
+      selection.searchKeyword // 保存用户使用的搜索关键词
     );
 
     // 获取该动漫的所有剧集列表
@@ -1479,13 +1693,14 @@ function PlayPageClient() {
 
           setCurrentDanmakuSelection(selection);
 
-          // 保存选择记忆
+          // 保存选择记忆（使用当前搜索关键词）
           saveDanmakuMemory(
             title,
             selection.animeId,
             selection.episodeId,
             selection.animeTitle,
-            selection.episodeTitle
+            selection.episodeTitle,
+            currentSearchKeyword || undefined // 使用保存的搜索关键词
           );
 
           // 加载弹幕
@@ -1582,37 +1797,84 @@ function PlayPageClient() {
 
             setCurrentDanmakuSelection(selection);
 
-            // 更新选择记忆
+            // 更新选择记忆（保留原搜索词）
             saveDanmakuMemory(
               title,
               selection.animeId,
               selection.episodeId,
               selection.animeTitle,
-              selection.episodeTitle
+              selection.episodeTitle,
+              memory.searchKeyword // 保留原有的搜索关键词
             );
 
             await loadDanmaku(episode.episodeId);
             return;
           }
         }
+
+        // 如果使用记忆加载失败，清除该记忆并继续自动搜索
+        console.warn('[弹幕] 使用缓存加载失败，清除缓存并从头搜索');
+        if (artPlayerRef.current) {
+          artPlayerRef.current.notice.show = '缓存的弹幕源失效，正在重新搜索...';
+        }
+        // 清除失效的记忆
+        if (typeof window !== 'undefined') {
+          try {
+            const memoriesJson = localStorage.getItem('danmaku_memories');
+            if (memoriesJson) {
+              const memories = JSON.parse(memoriesJson);
+              delete memories[title];
+              localStorage.setItem('danmaku_memories', JSON.stringify(memories));
+              console.log('[弹幕] 已清除失效的缓存记忆');
+            }
+          } catch (e) {
+            console.error('[弹幕] 清除缓存记忆失败:', e);
+          }
+        }
       } catch (error) {
-        console.error('获取弹幕剧集列表失败:', error);
+        console.error('[弹幕] 使用缓存加载失败:', error);
+        if (artPlayerRef.current) {
+          artPlayerRef.current.notice.show = '缓存的弹幕源失效，正在重新搜索...';
+        }
+        // 清除失效的记忆
+        if (typeof window !== 'undefined') {
+          try {
+            const memoriesJson = localStorage.getItem('danmaku_memories');
+            if (memoriesJson) {
+              const memories = JSON.parse(memoriesJson);
+              delete memories[title];
+              localStorage.setItem('danmaku_memories', JSON.stringify(memories));
+              console.log('[弹幕] 已清除失效的缓存记忆');
+            }
+          } catch (e) {
+            console.error('[弹幕] 清除缓存记忆失败:', e);
+          }
+        }
       }
+      // 继续执行后面的自动搜索逻辑，不要 return
     }
 
     // 自动搜索弹幕
     setDanmakuLoading(true);
 
+    // 优先使用保存的搜索关键词，否则使用视频标题
+    const searchKeyword = memory?.searchKeyword || title;
+    console.log('[弹幕] 搜索关键词:', searchKeyword, memory?.searchKeyword ? '(使用保存的关键词)' : '(使用视频标题)');
+
     try {
-      const searchResult = await searchAnime(title);
+      const searchResult = await searchAnime(searchKeyword);
 
       if (searchResult.success && searchResult.animes.length > 0) {
         // 如果有多个匹配结果，让用户选择
         if (searchResult.animes.length > 1) {
           console.log(`找到 ${searchResult.animes.length} 个弹幕源，等待用户选择`);
           setDanmakuMatches(searchResult.animes);
+          setCurrentSearchKeyword(searchKeyword); // 保存当前搜索关键词
           setShowDanmakuSourceSelector(true);
           setDanmakuLoading(false);
+          if (artPlayerRef.current) {
+            artPlayerRef.current.notice.show = `找到 ${searchResult.animes.length} 个弹幕源，请选择`;
+          }
           return;
         }
 
@@ -1646,13 +1908,14 @@ function PlayPageClient() {
 
             setCurrentDanmakuSelection(selection);
 
-            // 保存选择记忆
+            // 保存选择记忆（保存搜索关键词）
             saveDanmakuMemory(
               title,
               selection.animeId,
               selection.episodeId,
               selection.animeTitle,
-              selection.episodeTitle
+              selection.episodeTitle,
+              searchKeyword // 保存实际使用的搜索关键词
             );
 
             // 加载弹幕
@@ -1662,12 +1925,21 @@ function PlayPageClient() {
           }
         } else {
           console.warn('未找到剧集信息');
+          if (artPlayerRef.current) {
+            artPlayerRef.current.notice.show = '弹幕加载失败：未找到剧集信息';
+          }
         }
       } else {
         console.warn('未找到匹配的弹幕');
+        if (artPlayerRef.current) {
+          artPlayerRef.current.notice.show = '未找到匹配的弹幕，可在弹幕选项卡手动搜索';
+        }
       }
     } catch (error) {
       console.error('自动搜索弹幕失败:', error);
+      if (artPlayerRef.current) {
+        artPlayerRef.current.notice.show = '弹幕加载失败，请检查网络或稍后重试';
+      }
     } finally {
       setDanmakuLoading(false);
     }
@@ -2098,11 +2370,23 @@ function PlayPageClient() {
             theme: 'dark',
             filter: (danmu: any) => {
               // 应用过滤规则
-              if (danmakuSettingsRef.current.filterRules.length > 0) {
-                for (const rule of danmakuSettingsRef.current.filterRules) {
+              const filterConfig = danmakuFilterConfigRef.current;
+              if (filterConfig && filterConfig.rules.length > 0) {
+                for (const rule of filterConfig.rules) {
+                  // 跳过未启用的规则
+                  if (!rule.enabled) continue;
+
                   try {
-                    if (new RegExp(rule).test(danmu.text)) {
-                      return false;
+                    if (rule.type === 'normal') {
+                      // 普通模式：字符串包含匹配
+                      if (danmu.text.includes(rule.keyword)) {
+                        return false;
+                      }
+                    } else if (rule.type === 'regex') {
+                      // 正则模式：正则表达式匹配
+                      if (new RegExp(rule.keyword).test(danmu.text)) {
+                        return false;
+                      }
                     }
                   } catch (e) {
                     console.error('弹幕过滤规则错误:', e);
@@ -2142,6 +2426,24 @@ function PlayPageClient() {
                 // ignore
               }
               return newVal ? '当前开启' : '当前关闭';
+            },
+          },
+          {
+            html: '弹幕过滤',
+            icon: '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8z" fill="#ffffff"/><path d="M8 12h8" stroke="#ffffff" stroke-width="2" stroke-linecap="round"/></svg>',
+            tooltip: '配置弹幕过滤规则',
+            onClick() {
+              // 如果播放器处于全屏状态，先退出全屏
+              if (artPlayerRef.current && artPlayerRef.current.fullscreen) {
+                artPlayerRef.current.fullscreen = false;
+                // 延迟一下再显示弹窗，确保全屏退出动画完成
+                setTimeout(() => {
+                  setShowDanmakuFilterSettings(true);
+                }, 300);
+              } else {
+                setShowDanmakuFilterSettings(true);
+              }
+              return '打开设置';
             },
           },
           ...(webGPUSupported ? [
@@ -3344,6 +3646,26 @@ function PlayPageClient() {
           </div>
         )}
       </div>
+
+      {/* Toast通知 */}
+      {toast && <Toast {...toast} />}
+
+      {/* 弹幕过滤设置对话框 */}
+      <DanmakuFilterSettings
+        isOpen={showDanmakuFilterSettings}
+        onClose={() => setShowDanmakuFilterSettings(false)}
+        onConfigUpdate={(config) => {
+          setDanmakuFilterConfig(config);
+          danmakuFilterConfigRef.current = config;
+        }}
+        onShowToast={(message, type) => {
+          setToast({
+            message,
+            type,
+            onClose: () => setToast(null),
+          });
+        }}
+      />
     </PageLayout>
   );
 }

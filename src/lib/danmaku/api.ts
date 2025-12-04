@@ -19,7 +19,7 @@ export async function searchAnime(
     const response = await fetch(url);
 
     if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
+      throw new Error('弹幕服务器连接异常，请检查你的设置');
     }
 
     const data = (await response.json()) as DanmakuSearchResponse;
@@ -52,7 +52,7 @@ export async function matchAnime(
     });
 
     if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
+      throw new Error('弹幕服务器连接异常，请检查你的设置');
     }
 
     const data = (await response.json()) as DanmakuMatchResponse;
@@ -78,7 +78,7 @@ export async function getEpisodes(
     const response = await fetch(url);
 
     if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
+      throw new Error('弹幕服务器连接异常，请检查你的设置');
     }
 
     const data = (await response.json()) as DanmakuEpisodesResponse;
@@ -107,7 +107,7 @@ export async function getDanmakuById(
     const response = await fetch(url);
 
     if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
+      throw new Error('弹幕服务器连接异常，请检查你的设置');
     }
 
     const data = (await response.json()) as DanmakuCommentsResponse;
@@ -125,7 +125,7 @@ export async function getDanmakuByUrl(url: string): Promise<DanmakuComment[]> {
     const response = await fetch(apiUrl);
 
     if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
+      throw new Error('弹幕服务器连接异常，请检查你的设置');
     }
 
     const data = (await response.json()) as DanmakuCommentsResponse;
@@ -220,6 +220,7 @@ export interface DanmakuMemory {
   animeTitle: string;
   episodeTitle: string;
   timestamp: number;
+  searchKeyword?: string; // 用户手动搜索时使用的关键词
 }
 
 // 保存弹幕选择记忆
@@ -228,7 +229,8 @@ export function saveDanmakuMemory(
   animeId: number,
   episodeId: number,
   animeTitle: string,
-  episodeTitle: string
+  episodeTitle: string,
+  searchKeyword?: string // 可选的搜索关键词
 ): void {
   if (typeof window === 'undefined') return;
 
@@ -240,6 +242,7 @@ export function saveDanmakuMemory(
       animeTitle,
       episodeTitle,
       timestamp: Date.now(),
+      searchKeyword, // 保存搜索关键词
     };
 
     // 获取现有的记忆

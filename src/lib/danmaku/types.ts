@@ -113,4 +113,5 @@ export interface DanmakuSelection {
   episodeId: number;
   animeTitle: string;
   episodeTitle: string;
+  searchKeyword?: string; // 用户搜索时使用的关键词
 }
