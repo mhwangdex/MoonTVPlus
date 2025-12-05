@@ -11,6 +11,17 @@ export interface ChangelogEntry {
 
 export const changelog: ChangelogEntry[] = [
   {
+    version: '200.3.0',
+    date: '2025-12-05',
+    added: [
+      '增加自定义去广告功能'
+    ],
+    changed: [
+      '现在外部播放器支持去广告了'
+    ],
+    fixed: ['修复首页/api/favorites接口重复请求'],
+  },
+  {
     version: '200.2.0',
     date: '2025-12-04',
     added: [

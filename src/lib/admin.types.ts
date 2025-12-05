@@ -21,6 +21,9 @@ export interface AdminConfig {
     DanmakuApiToken: string;
     // 评论功能开关
     EnableComments: boolean;
+    // 自定义去广告代码
+    CustomAdFilterCode?: string;
+    CustomAdFilterVersion?: number; // 代码版本号（时间戳）
   };
   UserConfig: {
     Users: {

@@ -42,6 +42,8 @@ export async function POST(request: NextRequest) {
       DanmakuApiBase,
       DanmakuApiToken,
       EnableComments,
+      CustomAdFilterCode,
+      CustomAdFilterVersion,
     } = body as {
       SiteName: string;
       Announcement: string;
@@ -56,6 +58,8 @@ export async function POST(request: NextRequest) {
       DanmakuApiBase: string;
       DanmakuApiToken: string;
       EnableComments: boolean;
+      CustomAdFilterCode?: string;
+      CustomAdFilterVersion?: number;
     };
 
     // 参数校验
@@ -72,7 +76,9 @@ export async function POST(request: NextRequest) {
       typeof FluidSearch !== 'boolean' ||
       typeof DanmakuApiBase !== 'string' ||
       typeof DanmakuApiToken !== 'string' ||
-      typeof EnableComments !== 'boolean'
+      typeof EnableComments !== 'boolean' ||
+      (CustomAdFilterCode !== undefined && typeof CustomAdFilterCode !== 'string') ||
+      (CustomAdFilterVersion !== undefined && typeof CustomAdFilterVersion !== 'number')
     ) {
       return NextResponse.json({ error: '参数格式错误' }, { status: 400 });
     }
@@ -105,6 +111,8 @@ export async function POST(request: NextRequest) {
       DanmakuApiBase,
       DanmakuApiToken,
       EnableComments,
+      CustomAdFilterCode,
+      CustomAdFilterVersion,
     };
 
     // 写入数据库

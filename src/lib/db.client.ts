@@ -101,11 +101,39 @@ const SEARCH_HISTORY_LIMIT = 20;
 class HybridCacheManager {
   private static instance: HybridCacheManager;
 
+  // 正在进行的请求 Promise 缓存（彻底防止并发重复请求）
+  private pendingRequests: Map<string, Promise<any>> = new Map();
+
   static getInstance(): HybridCacheManager {
     if (!HybridCacheManager.instance) {
       HybridCacheManager.instance = new HybridCacheManager();
     }
     return HybridCacheManager.instance;
+  }
+
+  /**
+   * 获取或创建请求 Promise（防止并发重复请求）
+   */
+  getOrCreateRequest<T>(
+    key: string,
+    fetcher: () => Promise<T>
+  ): Promise<T> {
+    // 如果已有正在进行的请求，直接返回
+    if (this.pendingRequests.has(key)) {
+      console.log(`[${key}] 复用进行中的请求`);
+      return this.pendingRequests.get(key)!;
+    }
+
+    console.log(`[${key}] 创建新请求`);
+    // 创建新请求
+    const promise = fetcher()
+      .finally(() => {
+        // 请求完成后清除缓存
+        this.pendingRequests.delete(key);
+      });
+
+    this.pendingRequests.set(key, promise);
+    return promise;
   }
 
   /**
@@ -437,37 +465,40 @@ async function handleDatabaseOperationFailure(
   triggerGlobalError(`数据库操作失败`);
 
   try {
-    let freshData: any;
-    let eventName: string;
+    // 使用 Promise 缓存防止并发重复请求
+    await cacheManager.getOrCreateRequest(`recovery-${dataType}`, async () => {
+      let freshData: any;
+      let eventName: string;
 
-    switch (dataType) {
-      case 'playRecords':
-        freshData = await fetchFromApi<Record<string, PlayRecord>>(
-          `/api/playrecords`
-        );
-        cacheManager.cachePlayRecords(freshData);
-        eventName = 'playRecordsUpdated';
-        break;
-      case 'favorites':
-        freshData = await fetchFromApi<Record<string, Favorite>>(
-          `/api/favorites`
-        );
-        cacheManager.cacheFavorites(freshData);
-        eventName = 'favoritesUpdated';
-        break;
-      case 'searchHistory':
-        freshData = await fetchFromApi<string[]>(`/api/searchhistory`);
-        cacheManager.cacheSearchHistory(freshData);
-        eventName = 'searchHistoryUpdated';
-        break;
-    }
+      switch (dataType) {
+        case 'playRecords':
+          freshData = await fetchFromApi<Record<string, PlayRecord>>(
+            `/api/playrecords`
+          );
+          cacheManager.cachePlayRecords(freshData);
+          eventName = 'playRecordsUpdated';
+          break;
+        case 'favorites':
+          freshData = await fetchFromApi<Record<string, Favorite>>(
+            `/api/favorites`
+          );
+          cacheManager.cacheFavorites(freshData);
+          eventName = 'favoritesUpdated';
+          break;
+        case 'searchHistory':
+          freshData = await fetchFromApi<string[]>(`/api/searchhistory`);
+          cacheManager.cacheSearchHistory(freshData);
+          eventName = 'searchHistoryUpdated';
+          break;
+      }
 
-    // 触发更新事件通知组件
-    window.dispatchEvent(
-      new CustomEvent(eventName, {
-        detail: freshData,
-      })
-    );
+      // 触发更新事件通知组件
+      window.dispatchEvent(
+        new CustomEvent(eventName, {
+          detail: freshData,
+        })
+      );
+    });
   } catch (refreshErr) {
     console.error(`刷新${dataType}缓存失败:`, refreshErr);
     triggerGlobalError(`刷新${dataType}缓存失败`);
@@ -935,6 +966,12 @@ export async function deleteSearchHistory(keyword: string): Promise<void> {
 
 // ---------------- 收藏相关 API ----------------
 
+// 模块级别的防重复请求机制
+let pendingFavoritesBackgroundRequest: Promise<void> | null = null;
+let pendingFavoritesFetchRequest: Promise<Record<string, Favorite>> | null = null;
+let lastFavoritesBackgroundFetchTime = 0;
+const MIN_BACKGROUND_FETCH_INTERVAL = 3000; // 3秒内不重复后台请求
+
 /**
  * 获取全部收藏。
  * 数据库存储模式下使用混合缓存策略：优先返回缓存数据，后台异步同步最新数据。
@@ -951,39 +988,55 @@ export async function getAllFavorites(): Promise<Record<string, Favorite>> {
     const cachedData = cacheManager.getCachedFavorites();
 
     if (cachedData) {
-      // 返回缓存数据，同时后台异步更新
-      fetchFromApi<Record<string, Favorite>>(`/api/favorites`)
-        .then((freshData) => {
-          // 只有数据真正不同时才更新缓存
-          if (JSON.stringify(cachedData) !== JSON.stringify(freshData)) {
-            cacheManager.cacheFavorites(freshData);
-            // 触发数据更新事件
-            window.dispatchEvent(
-              new CustomEvent('favoritesUpdated', {
-                detail: freshData,
-              })
-            );
+      // 有缓存：返回缓存，后台异步刷新（带防抖和防重复）
+      const now = Date.now();
+      if (now - lastFavoritesBackgroundFetchTime > MIN_BACKGROUND_FETCH_INTERVAL && !pendingFavoritesBackgroundRequest) {
+        lastFavoritesBackgroundFetchTime = now;
+
+        pendingFavoritesBackgroundRequest = (async () => {
+          try {
+            const freshData = await fetchFromApi<Record<string, Favorite>>(`/api/favorites`);
+            // 只有数据真正不同时才更新缓存
+            if (JSON.stringify(cachedData) !== JSON.stringify(freshData)) {
+              cacheManager.cacheFavorites(freshData);
+              // 触发数据更新事件
+              window.dispatchEvent(
+                new CustomEvent('favoritesUpdated', {
+                  detail: freshData,
+                })
+              );
+            }
+          } catch (err) {
+            console.warn('后台同步收藏失败:', err);
+            triggerGlobalError('后台同步收藏失败');
+          } finally {
+            pendingFavoritesBackgroundRequest = null;
           }
-        })
-        .catch((err) => {
-          console.warn('后台同步收藏失败:', err);
-          triggerGlobalError('后台同步收藏失败');
-        });
+        })();
+      }
 
       return cachedData;
     } else {
-      // 缓存为空，直接从 API 获取并缓存
-      try {
-        const freshData = await fetchFromApi<Record<string, Favorite>>(
-          `/api/favorites`
-        );
-        cacheManager.cacheFavorites(freshData);
-        return freshData;
-      } catch (err) {
-        console.error('获取收藏失败:', err);
-        triggerGlobalError('获取收藏失败');
-        return {};
+      // 无缓存：直接获取（防重复请求）
+      if (pendingFavoritesFetchRequest) {
+        return pendingFavoritesFetchRequest;
       }
+
+      pendingFavoritesFetchRequest = (async () => {
+        try {
+          const freshData = await fetchFromApi<Record<string, Favorite>>(`/api/favorites`);
+          cacheManager.cacheFavorites(freshData);
+          return freshData;
+        } catch (err) {
+          console.error('获取收藏失败:', err);
+          triggerGlobalError('获取收藏失败');
+          return {};
+        } finally {
+          pendingFavoritesFetchRequest = null;
+        }
+      })();
+
+      return pendingFavoritesFetchRequest;
     }
   }
 
@@ -1132,44 +1185,19 @@ export async function isFavorited(
 ): Promise<boolean> {
   const key = generateStorageKey(source, id);
 
-  // 数据库存储模式：使用混合缓存策略（包括 redis 和 upstash）
+  // 数据库存储模式：直接从缓存读取，不触发后台刷新
+  // 后台刷新由 getAllFavorites() 统一管理，避免重复请求
   if (STORAGE_TYPE !== 'localstorage') {
     const cachedFavorites = cacheManager.getCachedFavorites();
 
     if (cachedFavorites) {
-      // 返回缓存数据，同时后台异步更新
-      fetchFromApi<Record<string, Favorite>>(`/api/favorites`)
-        .then((freshData) => {
-          // 只有数据真正不同时才更新缓存
-          if (JSON.stringify(cachedFavorites) !== JSON.stringify(freshData)) {
-            cacheManager.cacheFavorites(freshData);
-            // 触发数据更新事件
-            window.dispatchEvent(
-              new CustomEvent('favoritesUpdated', {
-                detail: freshData,
-              })
-            );
-          }
-        })
-        .catch((err) => {
-          console.warn('后台同步收藏失败:', err);
-          triggerGlobalError('后台同步收藏失败');
-        });
-
+      // 直接返回缓存结果，不触发后台刷新
       return !!cachedFavorites[key];
     } else {
-      // 缓存为空，直接从 API 获取并缓存
-      try {
-        const freshData = await fetchFromApi<Record<string, Favorite>>(
-          `/api/favorites`
-        );
-        cacheManager.cacheFavorites(freshData);
-        return !!freshData[key];
-      } catch (err) {
-        console.error('检查收藏状态失败:', err);
-        triggerGlobalError('检查收藏状态失败');
-        return false;
-      }
+      // 缓存为空时，调用 getAllFavorites() 来获取并缓存数据
+      // 这样可以复用 getAllFavorites() 中的防重复请求机制
+      const allFavorites = await getAllFavorites();
+      return !!allFavorites[key];
     }
   }
 
@@ -1280,50 +1308,53 @@ export async function refreshAllCache(): Promise<void> {
   if (STORAGE_TYPE === 'localstorage') return;
 
   try {
-    // 并行刷新所有数据
-    const [playRecords, favorites, searchHistory, skipConfigs] =
-      await Promise.allSettled([
-        fetchFromApi<Record<string, PlayRecord>>(`/api/playrecords`),
-        fetchFromApi<Record<string, Favorite>>(`/api/favorites`),
-        fetchFromApi<string[]>(`/api/searchhistory`),
-        fetchFromApi<Record<string, SkipConfig>>(`/api/skipconfigs`),
-      ]);
+    // 使用 Promise 缓存防止并发重复刷新
+    await cacheManager.getOrCreateRequest('refresh-all-cache', async () => {
+      // 并行刷新所有数据
+      const [playRecords, favorites, searchHistory, skipConfigs] =
+        await Promise.allSettled([
+          fetchFromApi<Record<string, PlayRecord>>(`/api/playrecords`),
+          fetchFromApi<Record<string, Favorite>>(`/api/favorites`),
+          fetchFromApi<string[]>(`/api/searchhistory`),
+          fetchFromApi<Record<string, SkipConfig>>(`/api/skipconfigs`),
+        ]);
 
-    if (playRecords.status === 'fulfilled') {
-      cacheManager.cachePlayRecords(playRecords.value);
-      window.dispatchEvent(
-        new CustomEvent('playRecordsUpdated', {
-          detail: playRecords.value,
-        })
-      );
-    }
+      if (playRecords.status === 'fulfilled') {
+        cacheManager.cachePlayRecords(playRecords.value);
+        window.dispatchEvent(
+          new CustomEvent('playRecordsUpdated', {
+            detail: playRecords.value,
+          })
+        );
+      }
 
-    if (favorites.status === 'fulfilled') {
-      cacheManager.cacheFavorites(favorites.value);
-      window.dispatchEvent(
-        new CustomEvent('favoritesUpdated', {
-          detail: favorites.value,
-        })
-      );
-    }
+      if (favorites.status === 'fulfilled') {
+        cacheManager.cacheFavorites(favorites.value);
+        window.dispatchEvent(
+          new CustomEvent('favoritesUpdated', {
+            detail: favorites.value,
+          })
+        );
+      }
 
-    if (searchHistory.status === 'fulfilled') {
-      cacheManager.cacheSearchHistory(searchHistory.value);
-      window.dispatchEvent(
-        new CustomEvent('searchHistoryUpdated', {
-          detail: searchHistory.value,
-        })
-      );
-    }
+      if (searchHistory.status === 'fulfilled') {
+        cacheManager.cacheSearchHistory(searchHistory.value);
+        window.dispatchEvent(
+          new CustomEvent('searchHistoryUpdated', {
+            detail: searchHistory.value,
+          })
+        );
+      }
 
-    if (skipConfigs.status === 'fulfilled') {
-      cacheManager.cacheSkipConfigs(skipConfigs.value);
-      window.dispatchEvent(
-        new CustomEvent('skipConfigsUpdated', {
-          detail: skipConfigs.value,
-        })
-      );
-    }
+      if (skipConfigs.status === 'fulfilled') {
+        cacheManager.cacheSkipConfigs(skipConfigs.value);
+        window.dispatchEvent(
+          new CustomEvent('skipConfigsUpdated', {
+            detail: skipConfigs.value,
+          })
+        );
+      }
+    });
   } catch (err) {
     console.error('刷新缓存失败:', err);
     triggerGlobalError('刷新缓存失败');

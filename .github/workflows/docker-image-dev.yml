@@ -10,8 +10,8 @@ on:
         default: 'dev'
         type: string
   push:
-    # 同时监听 main 和 dev 分支的推送
-    branches: [ main, dev ]
+    # 监听 dev 分支的推送
+    branches: [ dev ]
   # 取消了 pull_request 触发，因为它通常不应该触发构建和推送镜像的操作
   # 如果确实需要，可以重新加回来
   # pull_request:
