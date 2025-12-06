@@ -22,9 +22,10 @@
 ## 🎉 相对原版新增内容
 
 - 🎮 **外部播放器跳转**：支持 PotPlayer、VLC、MPV、MX Player、nPlayer、IINA 等多种外部播放器
-- ✨ **视频超分 (Anime4K)**：使用 WebGPU 技术实现实时视频画质增强（支持 2x/3x/4x 超分）
-- 💬 **弹幕系统**：完整的弹幕搜索、匹配、加载功能，支持弹幕设置持久化
+- ✨ **视频超分 (Anime4K)**：使用 WebGPU 技术实现实时视频画质增强（支持 1.5x/2x/3x/4x 超分）
+- 💬 **弹幕系统**：完整的弹幕搜索、匹配、加载功能，支持弹幕设置持久化、弹幕屏蔽
 - 📝 **豆瓣评论抓取**：自动抓取并展示豆瓣电影短评，支持分页加载
+- 🪒**自定义去广告**：你可以自定义你的去广告代码，实现更强力的去广告功能
 
 ## ✨ 功能特性
 
@@ -34,7 +35,7 @@
 - ❤️ **收藏 + 继续观看**：支持 Kvrocks/Redis/Upstash 存储，多端同步进度。
 - 📱 **PWA**：离线缓存、安装到桌面/主屏，移动端原生体验。
 - 🌗 **响应式布局**：桌面侧边栏 + 移动底部导航，自适应各种屏幕尺寸。
-- 👿 **智能去广告**：自动跳过视频中的切片广告（实验性）。
+- 👿 **智能去广告**：自动跳过视频中的切片广告，更可以自定义你的去广告代码以增强去广告功能。
 
 ### 注意：部署后项目为空壳项目，无内置播放源和直播源，需要自行收集
 
@@ -49,26 +50,18 @@
 
 ## 🗺 目录
 
-- [弹幕后端部署](#弹幕后端部署)
 - [技术栈](#技术栈)
 - [部署](#部署)
 - [配置文件](#配置文件)
 - [自动更新](#自动更新)
 - [环境变量](#环境变量)
-- [AndroidTV 使用](#AndroidTV-使用)
+- [弹幕后端部署](#弹幕后端部署)
+- [超分功能说明](#超分功能说明)
+- [AndroidTV 使用](#androidtv-使用)
+- [TVBOX 订阅功能](#tvbox-订阅功能)
 - [安全与隐私提醒](#安全与隐私提醒)
 - [License](#license)
 - [致谢](#致谢)
-
-## 弹幕后端部署
-
-要使用弹幕功能，需要额外部署弹幕 API 后端服务。
-
-### 部署步骤
-
-1. 按照[danmu_api](https://github.com/huangxd-/danmu_api.git)教程部署后端
-2. 建议配置SOURCE_ORDER或PLATFORM_ORDER环境变量，默认弹幕源很少
-3. 在管理面板设置后端地址
 
 
 
@@ -234,7 +227,7 @@ dockge/komodo 等 docker compose UI 也有自动更新功能
 | ----------------------------------- | -------------------------------------------- | -------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
 | USERNAME                            | 站长账号           | 任意字符串                       | 无默认，必填字段                                                                                                                     |
 | PASSWORD                            | 站长密码           | 任意字符串                       | 无默认，必填字段                                                                                                                     |
-| SITE_BASE                           | 站点 url              |       形如 https://example.com                  | 空                                                                                                                     |
+| SITE_BASE                           | 站点 url                                                     |       形如 https://example.com                  | 空                                                                                                                     |
 | NEXT_PUBLIC_SITE_NAME               | 站点名称                                     | 任意字符串                       | MoonTV                                                                                                                     |
 | ANNOUNCEMENT                        | 站点公告                                     | 任意字符串                       | 本网站仅提供影视信息搜索服务，所有内容均来自第三方网站。本站不存储任何视频资源，不对任何内容的准确性、合法性、完整性负责。 |
 | NEXT_PUBLIC_STORAGE_TYPE            | 播放记录/收藏的存储方式                      | redis、kvrocks、upstash | 无默认，必填字段                                                                                                               |
@@ -249,6 +242,10 @@ dockge/komodo 等 docker compose UI 也有自动更新功能
 | NEXT_PUBLIC_DOUBAN_IMAGE_PROXY      | 自定义豆瓣图片代理 URL                       | url prefix                       | (空)                                                                                                                       |
 | NEXT_PUBLIC_DISABLE_YELLOW_FILTER   | 关闭色情内容过滤                             | true/false                       | false                                                                                                                      |
 | NEXT_PUBLIC_FLUID_SEARCH | 是否开启搜索接口流式输出 | true/ false | true |
+| NEXT_PUBLIC_PROXY_M3U8_TOKEN | M3U8 代理 API 鉴权 Token（外部播放器跳转时的鉴权token，不填为无鉴权） | 任意字符串 | (空) |
+| NEXT_PUBLIC_DANMAKU_CACHE_EXPIRE_MINUTES | 弹幕缓存失效时间（分钟数，设为 0 时不缓存） | 0 或正整数 | 4320（3天） |
+| ENABLE_TVBOX_SUBSCRIBE | 是否启用 TVBOX 订阅功能 | true/false | false |
+| TVBOX_SUBSCRIBE_TOKEN | TVBOX 订阅 API 访问 Token，如启用TVBOX功能必须设置该项 | 任意字符串 | (空) |
 
 NEXT_PUBLIC_DOUBAN_PROXY_TYPE 选项解释：
 
@@ -267,11 +264,50 @@ NEXT_PUBLIC_DOUBAN_IMAGE_PROXY_TYPE 选项解释：
 - cmliussss-cdn-ali：由浏览器请求豆瓣 CDN，该 CDN 由 [CMLiussss](https://github.com/cmliu) 搭建，并由阿里云 cdn 提供加速
 - custom: 用户自定义 proxy，由 NEXT_PUBLIC_DOUBAN_IMAGE_PROXY 定义
 
+
+
+## 弹幕后端部署
+
+要使用弹幕功能，需要额外部署弹幕 API 后端服务。
+
+### 部署步骤
+
+1. 按照[danmu_api](https://github.com/huangxd-/danmu_api.git)教程部署后端
+2. 建议配置SOURCE_ORDER或PLATFORM_ORDER环境变量，默认弹幕源很少
+3. 在管理面板设置后端地址
+
+
+
+
+##  超分功能说明
+超分功能需要浏览器支持webgpu并且你的浏览器环境不能是http（如非要在http中使用，需要在浏览器端设置允许不安全的内容）
+
+
+
+
 ## AndroidTV 使用
 
 目前该项目可以配合 [OrionTV](https://github.com/zimplexing/OrionTV) 在 Android TV 上使用，可以直接作为 OrionTV 后端
 
 已实现播放记录和网页端同步
+
+## TVBOX 订阅功能
+
+本项目支持生成 TVBOX 格式的订阅链接，方便在 TVBOX 应用中使用。
+
+### 配置步骤
+
+1. 在环境变量中设置以下配置：
+   ```env
+   # 启用 TVBOX 订阅功能
+   ENABLE_TVBOX_SUBSCRIBE=true
+   # 设置订阅访问 Token（请使用强密码）
+   TVBOX_SUBSCRIBE_TOKEN=your_secure_random_token
+   ```
+   
+2. 重启应用后，登录网站，点击用户菜单中的"订阅"按钮
+
+3. 复制生成的订阅链接到 TVBOX 应用中使用
 
 ## 安全与隐私提醒
 

@@ -11,6 +11,18 @@ export interface ChangelogEntry {
 
 export const changelog: ChangelogEntry[] = [
   {
+    version: '200.4.0',
+    date: '2025-12-06',
+    added: [
+      '增加弹幕本地缓存',
+      '增加tvbox订阅功能，自带去广告'
+    ],
+    changed: [
+      '外部播放器使用代理m3u8时现在可以增加鉴权了'
+    ],
+    fixed: [],
+  },
+  {
     version: '200.3.0',
     date: '2025-12-05',
     added: [

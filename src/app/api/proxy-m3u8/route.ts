@@ -7,13 +7,25 @@ export const runtime = 'nodejs';
 /**
  * M3U8 代理接口
  * 用于外部播放器访问,会执行去广告逻辑并处理相对链接
- * GET /api/proxy-m3u8?url=<原始m3u8地址>&source=<播放源>
+ * GET /api/proxy-m3u8?url=<原始m3u8地址>&source=<播放源>&token=<鉴权token>
  */
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
     const m3u8Url = searchParams.get('url');
     const source = searchParams.get('source') || '';
+    const token = searchParams.get('token');
+
+    // Token 鉴权：如果环境变量设置了 token，则必须验证
+    const envToken = process.env.NEXT_PUBLIC_PROXY_M3U8_TOKEN;
+    if (envToken && envToken.trim() !== '') {
+      if (!token || token !== envToken) {
+        return NextResponse.json(
+          { error: '无效的访问令牌' },
+          { status: 401 }
+        );
+      }
+    }
 
     if (!m3u8Url) {
       return NextResponse.json(
@@ -70,7 +82,7 @@ export async function GET(request: Request) {
     }
 
     // 处理 m3u8 中的相对链接
-    m3u8Content = resolveM3u8Links(m3u8Content, m3u8Url, source, origin);
+    m3u8Content = resolveM3u8Links(m3u8Content, m3u8Url, source, origin, token || '');
 
     // 返回处理后的 m3u8 内容
     return new NextResponse(m3u8Content, {
@@ -134,7 +146,7 @@ function filterAdsFromM3U8Default(type: string, m3u8Content: string): string {
 /**
  * 将 m3u8 中的相对链接转换为绝对链接，并将子 m3u8 链接转为代理链接
  */
-function resolveM3u8Links(m3u8Content: string, baseUrl: string, source: string, proxyOrigin: string): string {
+function resolveM3u8Links(m3u8Content: string, baseUrl: string, source: string, proxyOrigin: string, token: string): string {
   const lines = m3u8Content.split('\n');
   const resolvedLines = [];
 
@@ -203,7 +215,8 @@ function resolveM3u8Links(m3u8Content: string, baseUrl: string, source: string, 
     // 2. 检查是否是子 m3u8，如果是，转换为代理链接
     const isM3u8 = url.includes('.m3u8') || isNextLineUrl;
     if (isM3u8) {
-      url = `${proxyOrigin}/api/proxy-m3u8?url=${encodeURIComponent(url)}${source ? `&source=${encodeURIComponent(source)}` : ''}`;
+      const tokenParam = token ? `&token=${encodeURIComponent(token)}` : '';
+      url = `${proxyOrigin}/api/proxy-m3u8?url=${encodeURIComponent(url)}${source ? `&source=${encodeURIComponent(source)}` : ''}${tokenParam}`;
     }
 
     resolvedLines.push(url);
