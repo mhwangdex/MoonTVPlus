@@ -126,27 +126,27 @@ export const UserMenu: React.FC = () => {
     setMounted(true);
   }, []);
 
-  // 获取订阅配置
+  // 从运行时配置读取订阅是否启用
   useEffect(() => {
-    const fetchSubscribeConfig = async () => {
-      try {
-        // 获取当前浏览器地址
-        const currentOrigin = window.location.origin;
-        const response = await fetch(`/api/tvbox/config?origin=${encodeURIComponent(currentOrigin)}&adFilter=${adFilterEnabled}`);
-        if (response.ok) {
-          const data = await response.json();
-          setSubscribeEnabled(data.enabled);
-          setSubscribeUrl(data.url);
-        }
-      } catch (error) {
-        console.error('获取订阅配置失败:', error);
-      }
-    };
-
     if (typeof window !== 'undefined') {
-      fetchSubscribeConfig();
+      const enabled = (window as any).RUNTIME_CONFIG?.ENABLE_TVBOX_SUBSCRIBE || false;
+      setSubscribeEnabled(enabled);
     }
-  }, [adFilterEnabled]); // 依赖 adFilterEnabled，当开关改变时重新获取
+  }, []);
+
+  // 懒加载订阅 URL - 只在打开订阅面板时请求
+  const fetchSubscribeUrl = async () => {
+    try {
+      const currentOrigin = window.location.origin;
+      const response = await fetch(`/api/tvbox/config?origin=${encodeURIComponent(currentOrigin)}&adFilter=${adFilterEnabled}`);
+      if (response.ok) {
+        const data = await response.json();
+        setSubscribeUrl(data.url);
+      }
+    } catch (error) {
+      console.error('获取订阅URL失败:', error);
+    }
+  };
 
   // 获取认证信息和存储类型
   useEffect(() => {
@@ -306,15 +306,23 @@ export const UserMenu: React.FC = () => {
     setPasswordError('');
   };
 
-  const handleSubscribe = () => {
+  const handleSubscribe = async () => {
     setIsOpen(false);
     setIsSubscribeOpen(true);
     setCopySuccess(false);
+    // 懒加载:打开面板时才请求订阅URL
+    await fetchSubscribeUrl();
   };
 
   const handleCloseSubscribe = () => {
     setIsSubscribeOpen(false);
     setCopySuccess(false);
+  };
+
+  const handleAdFilterToggle = async (checked: boolean) => {
+    setAdFilterEnabled(checked);
+    // 当去广告开关改变时,重新获取订阅URL
+    await fetchSubscribeUrl();
   };
 
   const handleCopySubscribeUrl = async () => {
@@ -1155,7 +1163,7 @@ export const UserMenu: React.FC = () => {
                     type='checkbox'
                     className='sr-only peer'
                     checked={adFilterEnabled}
-                    onChange={(e) => setAdFilterEnabled(e.target.checked)}
+                    onChange={(e) => handleAdFilterToggle(e.target.checked)}
                   />
                   <div className='w-11 h-6 bg-gray-300 rounded-full peer-checked:bg-green-500 transition-colors dark:bg-gray-600'></div>
                   <div className='absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-transform peer-checked:translate-x-5'></div>

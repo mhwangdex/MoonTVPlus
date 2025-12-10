@@ -34,20 +34,39 @@ export async function GET(request: NextRequest) {
 
     const apiUrl = `${baseUrl}/api/v2/search/anime?keyword=${encodeURIComponent(keyword)}`;
 
-    const response = await fetch(apiUrl, {
-      method: 'GET',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-    });
+    // 添加超时控制
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000); // 10秒超时
 
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
+    try {
+      const response = await fetch(apiUrl, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        signal: controller.signal,
+        keepalive: true,
+      });
+
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+
+      return NextResponse.json(data);
+    } catch (fetchError) {
+      clearTimeout(timeoutId);
+
+      // 如果是超时错误，返回更友好的错误信息
+      if (fetchError instanceof Error && fetchError.name === 'AbortError') {
+        throw new Error('弹幕服务器请求超时，请稍后重试');
+      }
+
+      throw fetchError;
     }
-
-    const data = await response.json();
-
-    return NextResponse.json(data);
   } catch (error) {
     console.error('弹幕搜索代理错误:', error);
     return NextResponse.json(

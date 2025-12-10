@@ -8,6 +8,8 @@ import { Heart, Radio, Tv } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Suspense, useEffect, useRef, useState } from 'react';
 
+import { useLiveSync } from '@/hooks/useLiveSync';
+
 import {
   deleteFavorite,
   generateStorageKey,
@@ -121,6 +123,20 @@ function LivePageClient() {
   const [favorited, setFavorited] = useState(false);
   const favoritedRef = useRef(false);
   const currentChannelRef = useRef<LiveChannel | null>(null);
+
+  // 观影室同步功能
+  const liveSync = useLiveSync({
+    currentChannelId: currentChannel?.id || '',
+    currentChannelName: currentChannel?.name || '',
+    currentChannelUrl: currentChannel?.url || '',
+    onChannelChange: (channelId, channelUrl) => {
+      // 房员接收到频道切换指令
+      const channel = currentChannels.find(c => c.id === channelId);
+      if (channel) {
+        handleChannelChange(channel);
+      }
+    },
+  });
 
   // EPG数据清洗函数 - 去除重叠的节目，保留时间较短的，只显示今日节目
   const cleanEpgData = (programs: Array<{ start: string; end: string; title: string }>) => {

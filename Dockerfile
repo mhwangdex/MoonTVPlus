@@ -31,6 +31,9 @@ RUN pnpm run build
 # ---- 第 3 阶段：生成运行时镜像 ----
 FROM node:24-alpine AS runner
 
+# 启用 corepack 并激活 pnpm（用于安装额外依赖）
+RUN corepack enable && corepack prepare pnpm@latest --activate
+
 # 创建非 root 用户
 RUN addgroup -g 1001 -S nodejs && adduser -u 1001 -S nextjs -G nodejs
 
@@ -46,9 +49,14 @@ COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/scripts ./scripts
 # 从构建器中复制 start.js
 COPY --from=builder --chown=nextjs:nodejs /app/start.js ./start.js
+# 从构建器中复制自定义 server.js（包含 Socket.IO 支持）
+COPY --from=builder --chown=nextjs:nodejs /app/server.js ./server.js
 # 从构建器中复制 public 和 .next/static 目录
 COPY --from=builder --chown=nextjs:nodejs /app/public ./public
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
+
+# 安装 Socket.IO 相关依赖（standalone 模式不会自动包含）
+RUN pnpm add socket.io@^4.8.1 socket.io-client@^4.8.1 --prod
 
 # 切换到非特权用户
 USER nextjs

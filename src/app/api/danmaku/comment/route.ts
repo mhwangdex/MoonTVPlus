@@ -68,27 +68,46 @@ export async function GET(request: NextRequest) {
       apiUrl = `${baseUrl}/api/v2/comment?url=${encodeURIComponent(url!)}&format=xml`;
     }
 
-    const response = await fetch(apiUrl, {
-      method: 'GET',
-      headers: {
-        'Accept': 'application/xml, text/xml',
-      },
-    });
+    // 添加超时控制
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000); // 10秒超时
 
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
+    try {
+      const response = await fetch(apiUrl, {
+        method: 'GET',
+        headers: {
+          'Accept': 'application/xml, text/xml',
+        },
+        signal: controller.signal,
+        keepalive: true,
+      });
+
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      // 获取 XML 文本
+      const xmlText = await response.text();
+
+      // 解析 XML 为 JSON
+      const comments = parseXmlDanmaku(xmlText);
+
+      return NextResponse.json({
+        count: comments.length,
+        comments,
+      });
+    } catch (fetchError) {
+      clearTimeout(timeoutId);
+
+      // 如果是超时错误，返回更友好的错误信息
+      if (fetchError instanceof Error && fetchError.name === 'AbortError') {
+        throw new Error('弹幕服务器请求超时，请稍后重试');
+      }
+
+      throw fetchError;
     }
-
-    // 获取 XML 文本
-    const xmlText = await response.text();
-
-    // 解析 XML 为 JSON
-    const comments = parseXmlDanmaku(xmlText);
-
-    return NextResponse.json({
-      count: comments.length,
-      comments,
-    });
   } catch (error) {
     console.error('获取弹幕代理错误:', error);
     return NextResponse.json(

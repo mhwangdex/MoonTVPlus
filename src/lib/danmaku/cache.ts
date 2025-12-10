@@ -227,7 +227,9 @@ export async function clearExpiredDanmakuCache(): Promise<number> {
 
           cursor.continue();
         } else {
-          console.log(`已清除 ${deletedCount} 个过期弹幕缓存`);
+          if (deletedCount > 0) {
+            console.log(`已清除 ${deletedCount} 个过期弹幕缓存`);
+          }
           resolve(deletedCount);
         }
       };

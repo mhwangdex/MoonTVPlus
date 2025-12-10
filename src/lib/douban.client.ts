@@ -54,6 +54,40 @@ interface DoubanRecommendApiResponse {
   }>;
 }
 
+interface DoubanDetailApiResponse {
+  id: string;
+  title: string;
+  original_title?: string;
+  year: string;
+  type: 'movie' | 'tv';
+  subtype?: string;
+  is_tv?: boolean;
+  pic?: {
+    large: string;
+    normal: string;
+  };
+  rating?: {
+    value: number;
+    count: number;
+    star_count: number;
+  };
+  card_subtitle?: string;
+  intro?: string;
+  genres?: string[];
+  directors?: Array<{ name: string; id?: string }>;
+  actors?: Array<{ name: string; id?: string }>;
+  countries?: string[];
+  languages?: string[];
+  pubdate?: string[];
+  durations?: string[];
+  aka?: string[];
+  episodes_count?: number;
+  episodes_info?: string;
+  cover_url?: string;
+  url?: string;
+  [key: string]: any; // 允许其他字段
+}
+
 /**
  * 带超时的 fetch 请求
  */
@@ -475,5 +509,77 @@ async function fetchDoubanRecommends(
     };
   } catch (error) {
     throw new Error(`获取豆瓣推荐数据失败: ${(error as Error).message}`);
+  }
+}
+
+/**
+ * 浏览器端豆瓣详情数据获取函数
+ */
+export async function fetchDoubanDetail(
+  id: string,
+  proxyUrl: string,
+  useTencentCDN = false,
+  useAliCDN = false
+): Promise<DoubanDetailApiResponse> {
+  if (!id) {
+    throw new Error('id 参数不能为空');
+  }
+
+  const target = useTencentCDN
+    ? `https://m.douban.cmliussss.net/rexxar/api/v2/subject/${id}`
+    : useAliCDN
+      ? `https://m.douban.cmliussss.com/rexxar/api/v2/subject/${id}`
+      : `https://m.douban.com/rexxar/api/v2/subject/${id}`;
+
+  try {
+    const response = await fetchWithTimeout(
+      target,
+      useTencentCDN || useAliCDN ? '' : proxyUrl
+    );
+
+    if (!response.ok) {
+      throw new Error(`HTTP error! Status: ${response.status}`);
+    }
+
+    const doubanData: DoubanDetailApiResponse = await response.json();
+    return doubanData;
+  } catch (error) {
+    // 触发全局错误提示
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(
+        new CustomEvent('globalError', {
+          detail: { message: '获取豆瓣详情数据失败' },
+        })
+      );
+    }
+    throw new Error(`获取豆瓣详情数据失败: ${(error as Error).message}`);
+  }
+}
+
+/**
+ * 统一的豆瓣详情数据获取函数，根据代理设置选择使用服务端 API 或客户端代理获取
+ */
+export async function getDoubanDetail(
+  id: string
+): Promise<DoubanDetailApiResponse> {
+  const { proxyType, proxyUrl } = getDoubanProxyConfig();
+  switch (proxyType) {
+    case 'cors-proxy-zwei':
+      return fetchDoubanDetail(id, 'https://ciao-cors.is-an.org/');
+    case 'cmliussss-cdn-tencent':
+      return fetchDoubanDetail(id, '', true, false);
+    case 'cmliussss-cdn-ali':
+      return fetchDoubanDetail(id, '', false, true);
+    case 'cors-anywhere':
+      return fetchDoubanDetail(id, 'https://cors-anywhere.com/');
+    case 'custom':
+      return fetchDoubanDetail(id, proxyUrl);
+    case 'direct':
+    default:
+      const response = await fetch(`/api/douban/detail?id=${id}`);
+      if (!response.ok) {
+        throw new Error(`HTTP error! Status: ${response.status}`);
+      }
+      return response.json();
   }
 }

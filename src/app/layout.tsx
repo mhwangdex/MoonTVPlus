@@ -10,6 +10,12 @@ import { getConfig } from '@/lib/config';
 import { GlobalErrorIndicator } from '../components/GlobalErrorIndicator';
 import { SiteProvider } from '../components/SiteProvider';
 import { ThemeProvider } from '../components/ThemeProvider';
+import { WatchRoomProvider } from '../components/WatchRoomProvider';
+import ChatFloatingWindow from '../components/watch-room/ChatFloatingWindow';
+import { DownloadProvider } from '../contexts/DownloadContext';
+import { DownloadBubble } from '../components/DownloadBubble';
+import { DownloadPanel } from '../components/DownloadPanel';
+import { DanmakuCacheCleanup } from '../components/DanmakuCacheCleanup';
 
 const inter = Inter({ subsets: ['latin'] });
 export const dynamic = 'force-dynamic';
@@ -92,6 +98,7 @@ export default async function RootLayout({
     CUSTOM_CATEGORIES: customCategories,
     FLUID_SEARCH: fluidSearch,
     EnableComments: enableComments,
+    ENABLE_TVBOX_SUBSCRIBE: process.env.ENABLE_TVBOX_SUBSCRIBE === 'true',
   };
 
   return (
@@ -120,8 +127,16 @@ export default async function RootLayout({
           disableTransitionOnChange
         >
           <SiteProvider siteName={siteName} announcement={announcement}>
-            {children}
-            <GlobalErrorIndicator />
+            <WatchRoomProvider>
+              <DownloadProvider>
+                <DanmakuCacheCleanup />
+                {children}
+                <GlobalErrorIndicator />
+                <ChatFloatingWindow />
+                <DownloadBubble />
+                <DownloadPanel />
+              </DownloadProvider>
+            </WatchRoomProvider>
           </SiteProvider>
         </ThemeProvider>
       </body>

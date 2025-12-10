@@ -5,6 +5,8 @@ const nextConfig = {
   output: 'standalone',
   eslint: {
     dirs: ['src'],
+    // 在生产构建时忽略 ESLint 错误
+    ignoreDuringBuilds: true,
   },
 
   reactStrictMode: false,

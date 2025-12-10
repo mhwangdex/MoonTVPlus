@@ -1,0 +1,246 @@
+// WatchRoom 全局状态管理 Provider
+'use client';
+
+import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
+import { useWatchRoom } from '@/hooks/useWatchRoom';
+import type { Room, Member, ChatMessage, WatchRoomConfig } from '@/types/watch-room';
+import Toast, { ToastProps } from '@/components/Toast';
+
+// Import type from watch-room-socket
+type WatchRoomSocket = import('@/lib/watch-room-socket').WatchRoomSocket;
+
+interface WatchRoomContextType {
+  socket: WatchRoomSocket | null;
+  isConnected: boolean;
+  reconnectFailed: boolean;
+  currentRoom: Room | null;
+  members: Member[];
+  chatMessages: ChatMessage[];
+  isOwner: boolean;
+  isEnabled: boolean;
+  config: WatchRoomConfig | null;
+
+  // 房间操作
+  createRoom: (data: {
+    name: string;
+    description: string;
+    password?: string;
+    isPublic: boolean;
+    userName: string;
+  }) => Promise<Room>;
+  joinRoom: (data: {
+    roomId: string;
+    password?: string;
+    userName: string;
+  }) => Promise<{ room: Room; members: Member[] }>;
+  leaveRoom: () => void;
+  getRoomList: () => Promise<Room[]>;
+
+  // 聊天
+  sendChatMessage: (content: string, type?: 'text' | 'emoji') => void;
+
+  // 播放控制（供 play/live 页面使用）
+  updatePlayState: (state: any) => void;
+  seekPlayback: (currentTime: number) => void;
+  play: () => void;
+  pause: () => void;
+  changeVideo: (state: any) => void;
+  changeLiveChannel: (state: any) => void;
+  clearRoomState: () => void;
+
+  // 重连
+  manualReconnect: () => Promise<void>;
+}
+
+const WatchRoomContext = createContext<WatchRoomContextType | null>(null);
+
+export const useWatchRoomContext = () => {
+  const context = useContext(WatchRoomContext);
+  if (!context) {
+    throw new Error('useWatchRoomContext must be used within WatchRoomProvider');
+  }
+  return context;
+};
+
+// 安全版本，可以在非 Provider 内使用
+export const useWatchRoomContextSafe = () => {
+  return useContext(WatchRoomContext);
+};
+
+interface WatchRoomProviderProps {
+  children: React.ReactNode;
+}
+
+export function WatchRoomProvider({ children }: WatchRoomProviderProps) {
+  const [config, setConfig] = useState<WatchRoomConfig | null>(null);
+  const [isEnabled, setIsEnabled] = useState(false);
+  const [toast, setToast] = useState<ToastProps | null>(null);
+  const [reconnectFailed, setReconnectFailed] = useState(false);
+
+  // 处理房间删除的回调
+  const handleRoomDeleted = useCallback((data?: { reason?: string }) => {
+    console.log('[WatchRoomProvider] Room deleted:', data);
+
+    // 显示Toast提示
+    if (data?.reason === 'owner_left') {
+      setToast({
+        message: '房主已解散房间',
+        type: 'error',
+        duration: 4000,
+        onClose: () => setToast(null),
+      });
+    } else {
+      setToast({
+        message: '房间已被删除',
+        type: 'info',
+        duration: 3000,
+        onClose: () => setToast(null),
+      });
+    }
+  }, []);
+
+  // 处理房间状态清除的回调（房主离开超过30秒）
+  const handleStateCleared = useCallback(() => {
+    console.log('[WatchRoomProvider] Room state cleared');
+
+    setToast({
+      message: '房主已离开，播放状态已清除',
+      type: 'info',
+      duration: 4000,
+      onClose: () => setToast(null),
+    });
+  }, []);
+
+  const watchRoom = useWatchRoom(handleRoomDeleted, handleStateCleared);
+
+  // 手动重连
+  const manualReconnect = useCallback(async () => {
+    console.log('[WatchRoomProvider] Manual reconnect initiated');
+    setReconnectFailed(false);
+
+    const { watchRoomSocketManager } = await import('@/lib/watch-room-socket');
+    const success = await watchRoomSocketManager.reconnect();
+
+    if (success) {
+      console.log('[WatchRoomProvider] Manual reconnect succeeded');
+      // 尝试重新加入房间
+      const storedInfo = localStorage.getItem('watch_room_info');
+      if (storedInfo && watchRoom.socket) {
+        try {
+          const info = JSON.parse(storedInfo);
+          console.log('[WatchRoomProvider] Attempting to rejoin room after reconnect');
+          await watchRoom.joinRoom({
+            roomId: info.roomId,
+            password: info.password,
+            userName: info.userName,
+          });
+        } catch (error) {
+          console.error('[WatchRoomProvider] Failed to rejoin room after reconnect:', error);
+        }
+      }
+    } else {
+      console.error('[WatchRoomProvider] Manual reconnect failed');
+      setReconnectFailed(true);
+    }
+  }, [watchRoom]);
+
+  // 加载配置
+  useEffect(() => {
+    const loadConfig = async () => {
+      try {
+        // 使用公共 API 获取观影室配置（不需要管理员权限）
+        const response = await fetch('/api/server-config');
+        if (response.ok) {
+          const data = await response.json();
+          // API 返回格式: { SiteName, StorageType, Version, WatchRoom }
+          const watchRoomConfig: WatchRoomConfig = {
+            enabled: data.WatchRoom?.enabled ?? false, // 默认不启用
+            serverType: data.WatchRoom?.serverType ?? 'internal',
+            externalServerUrl: data.WatchRoom?.externalServerUrl,
+            externalServerAuth: data.WatchRoom?.externalServerAuth,
+          };
+          setConfig(watchRoomConfig);
+          setIsEnabled(watchRoomConfig.enabled);
+
+          // 只在启用了观影室时才连接
+          if (watchRoomConfig.enabled) {
+            console.log('[WatchRoom] Connecting with config:', watchRoomConfig);
+
+            // 设置重连回调
+            const { watchRoomSocketManager } = await import('@/lib/watch-room-socket');
+            watchRoomSocketManager.setReconnectFailedCallback(() => {
+              console.log('[WatchRoomProvider] Reconnect failed callback triggered');
+              setReconnectFailed(true);
+            });
+
+            watchRoomSocketManager.setReconnectSuccessCallback(() => {
+              console.log('[WatchRoomProvider] Reconnect success callback triggered');
+              setReconnectFailed(false);
+            });
+
+            await watchRoom.connect(watchRoomConfig);
+          } else {
+            console.log('[WatchRoom] Watch room is disabled, skipping connection');
+          }
+        } else {
+          console.error('[WatchRoom] Failed to load config:', response.status);
+          // 加载配置失败时，不连接，保持禁用状态
+          const defaultConfig: WatchRoomConfig = {
+            enabled: false,
+            serverType: 'internal',
+          };
+          setConfig(defaultConfig);
+          setIsEnabled(false);
+        }
+      } catch (error) {
+        console.error('[WatchRoom] Error loading config:', error);
+        // 加载配置失败时，不连接，保持禁用状态
+        const defaultConfig: WatchRoomConfig = {
+          enabled: false,
+          serverType: 'internal',
+        };
+        setConfig(defaultConfig);
+        setIsEnabled(false);
+      }
+    };
+
+    loadConfig();
+
+    // 清理
+    return () => {
+      watchRoom.disconnect();
+    };
+  }, []);
+
+  const contextValue: WatchRoomContextType = {
+    socket: watchRoom.socket,
+    isConnected: watchRoom.isConnected,
+    reconnectFailed,
+    currentRoom: watchRoom.currentRoom,
+    members: watchRoom.members,
+    chatMessages: watchRoom.chatMessages,
+    isOwner: watchRoom.isOwner,
+    isEnabled,
+    config,
+    createRoom: watchRoom.createRoom,
+    joinRoom: watchRoom.joinRoom,
+    leaveRoom: watchRoom.leaveRoom,
+    getRoomList: watchRoom.getRoomList,
+    sendChatMessage: watchRoom.sendChatMessage,
+    updatePlayState: watchRoom.updatePlayState,
+    seekPlayback: watchRoom.seekPlayback,
+    play: watchRoom.play,
+    pause: watchRoom.pause,
+    changeVideo: watchRoom.changeVideo,
+    changeLiveChannel: watchRoom.changeLiveChannel,
+    clearRoomState: watchRoom.clearRoomState,
+    manualReconnect,
+  };
+
+  return (
+    <WatchRoomContext.Provider value={contextValue}>
+      {children}
+      {toast && <Toast {...toast} />}
+    </WatchRoomContext.Provider>
+  );
+}

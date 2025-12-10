@@ -26,6 +26,8 @@
 - 💬 **弹幕系统**：完整的弹幕搜索、匹配、加载功能，支持弹幕设置持久化、弹幕屏蔽
 - 📝 **豆瓣评论抓取**：自动抓取并展示豆瓣电影短评，支持分页加载
 - 🪒**自定义去广告**：你可以自定义你的去广告代码，实现更强力的去广告功能
+- 🎭 **观影室**：支持多人同步观影、实时聊天、语音通话等功能（实验性）。
+- 📥 **M3U8完整下载**：通过合并m3u8片段实现完整视频下载。
 
 ## ✨ 功能特性
 
@@ -78,7 +80,9 @@
 
 ## 部署
 
-本项目**仅支持 Docker 或其他基于 Docker 的平台** 部署。
+本项目**支持 Docker 和Vercel平台** 部署。
+
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/mtvpls/MoonTVPlus)
 
 ### Kvrocks 存储（推荐）
 
@@ -246,6 +250,8 @@ dockge/komodo 等 docker compose UI 也有自动更新功能
 | NEXT_PUBLIC_DANMAKU_CACHE_EXPIRE_MINUTES | 弹幕缓存失效时间（分钟数，设为 0 时不缓存） | 0 或正整数 | 4320（3天） |
 | ENABLE_TVBOX_SUBSCRIBE | 是否启用 TVBOX 订阅功能 | true/false | false |
 | TVBOX_SUBSCRIBE_TOKEN | TVBOX 订阅 API 访问 Token，如启用TVBOX功能必须设置该项 | 任意字符串 | (空) |
+| WATCH_ROOM_ENABLED | 是否启用观影室功能 | true/false | false |
+| NEXT_PUBLIC_VOICE_CHAT_STRATEGY | 观影室语音聊天策略 | webrtc-fallback/server-only | webrtc-fallback |
 
 NEXT_PUBLIC_DOUBAN_PROXY_TYPE 选项解释：
 
@@ -263,6 +269,11 @@ NEXT_PUBLIC_DOUBAN_IMAGE_PROXY_TYPE 选项解释：
 - cmliussss-cdn-tencent：由浏览器请求豆瓣 CDN，该 CDN 由 [CMLiussss](https://github.com/cmliu) 搭建，并由腾讯云 cdn 提供加速
 - cmliussss-cdn-ali：由浏览器请求豆瓣 CDN，该 CDN 由 [CMLiussss](https://github.com/cmliu) 搭建，并由阿里云 cdn 提供加速
 - custom: 用户自定义 proxy，由 NEXT_PUBLIC_DOUBAN_IMAGE_PROXY 定义
+
+NEXT_PUBLIC_VOICE_CHAT_STRATEGY 选项解释：
+
+- webrtc-fallback：使用 WebRTC P2P 连接，失败时自动回退到服务器中转（推荐）
+- server-only：仅使用服务器中转（适用于无法建立 P2P 连接的网络环境）
 
 
 

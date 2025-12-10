@@ -47,6 +47,8 @@ interface EpisodeSelectorProps {
   /** 弹幕相关 */
   onDanmakuSelect?: (selection: DanmakuSelection) => void;
   currentDanmakuSelection?: DanmakuSelection | null;
+  /** 观影室房员状态 - 禁用选集和换源，但保留弹幕 */
+  isRoomMember?: boolean;
 }
 
 /**
@@ -68,6 +70,7 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
   precomputedVideoInfo,
   onDanmakuSelect,
   currentDanmakuSelection,
+  isRoomMember = false,
 }) => {
   const router = useRouter();
   const pageCount = Math.ceil(totalEpisodes / episodesPerPage);
@@ -94,8 +97,17 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
   }, [videoInfoMap]);
 
   // 主要的 tab 状态：'danmaku' | 'episodes' | 'sources'
-  // 默认显示选集选项卡
-  const [activeTab, setActiveTab] = useState<'danmaku' | 'episodes' | 'sources'>('episodes');
+  // 默认显示选集选项卡，但如果是房员则显示弹幕
+  const [activeTab, setActiveTab] = useState<'danmaku' | 'episodes' | 'sources'>(
+    isRoomMember ? 'danmaku' : 'episodes'
+  );
+
+  // 当房员状态变化时，自动切换到弹幕选项卡
+  useEffect(() => {
+    if (isRoomMember && (activeTab === 'episodes' || activeTab === 'sources')) {
+      setActiveTab('danmaku');
+    }
+  }, [isRoomMember, activeTab]);
 
   // 当前分页索引（0 开始）
   const initialPage = Math.floor((value - 1) / episodesPerPage);
@@ -360,8 +372,9 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
         {/* 选集选项卡 - 仅在多集时显示 */}
         {totalEpisodes > 1 && (
           <div
-            onClick={() => setActiveTab('episodes')}
-            className={`flex-1 py-3 px-6 text-center cursor-pointer transition-all duration-200 font-medium
+            onClick={() => !isRoomMember && setActiveTab('episodes')}
+            className={`flex-1 py-3 px-6 text-center transition-all duration-200 font-medium relative
+              ${isRoomMember ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}
               ${activeTab === 'episodes'
                 ? 'text-green-600 dark:text-green-400'
                 : 'text-gray-700 hover:text-green-600 bg-black/5 dark:bg-white/5 dark:text-gray-300 dark:hover:text-green-400 hover:bg-black/3 dark:hover:bg-white/3'
@@ -369,13 +382,15 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
             `.trim()}
           >
             选集
+            {isRoomMember && <span className="ml-1 text-xs">🔒</span>}
           </div>
         )}
 
         {/* 换源选项卡 */}
         <div
-          onClick={handleSourceTabClick}
-          className={`flex-1 py-3 px-6 text-center cursor-pointer transition-all duration-200 font-medium
+          onClick={() => !isRoomMember && handleSourceTabClick()}
+          className={`flex-1 py-3 px-6 text-center transition-all duration-200 font-medium relative
+            ${isRoomMember ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}
             ${activeTab === 'sources'
               ? 'text-green-600 dark:text-green-400'
               : 'text-gray-700 hover:text-green-600 bg-black/5 dark:bg-white/5 dark:text-gray-300 dark:hover:text-green-400 hover:bg-black/3 dark:hover:bg-white/3'
@@ -383,6 +398,7 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
           `.trim()}
         >
           换源
+          {isRoomMember && <span className="ml-1 text-xs">🔒</span>}
         </div>
 
         {/* 弹幕选项卡 */}
