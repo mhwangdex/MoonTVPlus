@@ -1850,7 +1850,8 @@ function PlayPageClient() {
     setDanmakuLoading(true);
 
     try {
-      // 先清空当前弹幕
+      // 先清空当前弹幕并隐藏
+      danmakuPluginRef.current.hide();
       danmakuPluginRef.current.config({
         danmuku: [],
       });
@@ -1901,11 +1902,24 @@ function PlayPageClient() {
         }
       }
 
-      // 加载弹幕到插件
+      // 加载弹幕到插件，同时应用当前的弹幕设置
+      const currentSettings = danmakuSettingsRef.current;
       danmakuPluginRef.current.config({
         danmuku: danmakuData,
+        speed: currentSettings.speed,
+        opacity: currentSettings.opacity,
+        fontSize: currentSettings.fontSize,
+        margin: [currentSettings.marginTop, currentSettings.marginBottom],
+        synchronousPlayback: currentSettings.synchronousPlayback,
       });
       danmakuPluginRef.current.load();
+
+      // 根据设置显示或隐藏弹幕
+      if (currentSettings.enabled) {
+        danmakuPluginRef.current.show();
+      } else {
+        danmakuPluginRef.current.hide();
+      }
 
       setDanmakuCount(danmakuData.length);
       console.log(`弹幕加载成功，共 ${danmakuData.length} 条`);
@@ -2099,6 +2113,7 @@ function PlayPageClient() {
             );
 
             console.log('[弹幕] 使用缓存成功，跳过搜索');
+            lastLoadedEpisodeIdRef.current = episode.episodeId;
             await loadDanmaku(episode.episodeId);
             return; // 成功使用缓存，直接返回
           }
@@ -2211,6 +2226,7 @@ function PlayPageClient() {
             );
 
             // 加载弹幕
+            lastLoadedEpisodeIdRef.current = episode.episodeId;
             await loadDanmaku(episode.episodeId);
 
             console.log('自动搜索弹幕成功:', selection);
