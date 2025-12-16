@@ -67,49 +67,22 @@ function VersionDisplay() {
   );
 }
 
-function LoginPageClient() {
+function RegisterPageClient() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const [password, setPassword] = useState('');
   const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [shouldAskUsername, setShouldAskUsername] = useState(false);
-  const [rememberPassword, setRememberPassword] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
   const [turnstileLoaded, setTurnstileLoaded] = useState(false);
   const [siteConfig, setSiteConfig] = useState<any>(null);
   const [turnstileWidgetId, setTurnstileWidgetId] = useState<string | null>(null);
 
   const { siteName } = useSite();
-
-  // 在客户端挂载后设置配置
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const storageType = (window as any).RUNTIME_CONFIG?.STORAGE_TYPE;
-      const shouldAsk = storageType && storageType !== 'localstorage';
-      setShouldAskUsername(shouldAsk);
-
-      // 从localStorage读取记住的密码信息
-      const rememberedCredentials = localStorage.getItem('rememberedCredentials');
-      if (rememberedCredentials) {
-        try {
-          const credentials = JSON.parse(rememberedCredentials);
-          if (credentials.password) {
-            setPassword(credentials.password);
-          }
-          if (credentials.username && shouldAsk) {
-            setUsername(credentials.username);
-          }
-          setRememberPassword(true);
-        } catch (error) {
-          // 清除无效的数据
-          localStorage.removeItem('rememberedCredentials');
-        }
-      }
-    }
-  }, []);
 
   // 获取站点配置
   useEffect(() => {
@@ -119,6 +92,11 @@ function LoginPageClient() {
         if (res.ok) {
           const config = await res.json();
           setSiteConfig(config);
+
+          // 如果未开启注册，重定向到登录页
+          if (!config.EnableRegistration) {
+            router.replace('/login');
+          }
         }
       } catch (error) {
         console.error('Failed to fetch config:', error);
@@ -126,11 +104,11 @@ function LoginPageClient() {
     };
 
     fetchConfig();
-  }, []);
+  }, [router]);
 
   // 加载Cloudflare Turnstile脚本
   useEffect(() => {
-    if (!siteConfig?.LoginRequireTurnstile || !siteConfig?.TurnstileSiteKey) {
+    if (!siteConfig?.RegistrationRequireTurnstile || !siteConfig?.TurnstileSiteKey) {
       return;
     }
 
@@ -170,51 +148,55 @@ function LoginPageClient() {
     e.preventDefault();
     setError(null);
 
-    if (!password || (shouldAskUsername && !username)) return;
+    if (!username || !password || !confirmPassword) {
+      setError('请填写所有字段');
+      return;
+    }
+
+    if (password !== confirmPassword) {
+      setError('两次输入的密码不一致');
+      return;
+    }
+
+    if (password.length < 6) {
+      setError('密码长度至少为6位');
+      return;
+    }
 
     // 检查Turnstile验证
-    if (siteConfig?.LoginRequireTurnstile && !turnstileToken) {
+    if (siteConfig?.RegistrationRequireTurnstile && !turnstileToken) {
       setError('请完成人机验证');
       return;
     }
 
     try {
       setLoading(true);
-      const res = await fetch('/api/login', {
+      const res = await fetch('/api/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          username,
           password,
-          ...(shouldAskUsername ? { username } : {}),
-          ...(siteConfig?.LoginRequireTurnstile ? { turnstileToken } : {}),
+          turnstileToken: siteConfig?.RegistrationRequireTurnstile ? turnstileToken : undefined,
         }),
       });
 
       if (res.ok) {
-        // 处理记住密码逻辑
-        if (rememberPassword) {
-          const credentials: any = { password };
-          // 如果需要用户名且有用户名，就保存用户名
-          if (shouldAskUsername && username) {
-            credentials.username = username;
-          }
-          localStorage.setItem('rememberedCredentials', JSON.stringify(credentials));
-        } else {
-          // 如果不记住密码，清除已存储的信息
-          localStorage.removeItem('rememberedCredentials');
-        }
-
-        const redirect = searchParams.get('redirect') || '/';
+        // 注册成功，跳转到登录页
+        const redirect = searchParams.get('redirect') || '/login';
         router.replace(redirect);
       } else {
-        // 登录失败，重置Turnstile
-        if (siteConfig?.LoginRequireTurnstile && turnstileWidgetId !== null && (window as any).turnstile) {
+        // 注册失败，重置Turnstile
+        if (siteConfig?.RegistrationRequireTurnstile && turnstileWidgetId !== null && (window as any).turnstile) {
           (window as any).turnstile.reset(turnstileWidgetId);
           setTurnstileToken(null);
         }
 
-        if (res.status === 401) {
-          setError('密码错误');
+        if (res.status === 400) {
+          const data = await res.json().catch(() => ({}));
+          setError(data.error || '注册失败');
+        } else if (res.status === 409) {
+          setError('用户名已存在');
         } else {
           const data = await res.json().catch(() => ({}));
           setError(data.error ?? '服务器错误');
@@ -222,7 +204,7 @@ function LoginPageClient() {
       }
     } catch (error) {
       // 网络错误，重置Turnstile
-      if (siteConfig?.LoginRequireTurnstile && turnstileWidgetId !== null && (window as any).turnstile) {
+      if (siteConfig?.RegistrationRequireTurnstile && turnstileWidgetId !== null && (window as any).turnstile) {
         (window as any).turnstile.reset(turnstileWidgetId);
         setTurnstileToken(null);
       }
@@ -232,7 +214,14 @@ function LoginPageClient() {
     }
   };
 
-
+  // 如果配置未加载或未开启注册，显示加载中
+  if (!siteConfig) {
+    return (
+      <div className='relative min-h-screen flex items-center justify-center px-4'>
+        <div className='text-gray-500 dark:text-gray-400'>加载中...</div>
+      </div>
+    );
+  }
 
   return (
     <div className='relative min-h-screen flex items-center justify-center px-4 overflow-hidden'>
@@ -240,26 +229,27 @@ function LoginPageClient() {
         <ThemeToggle />
       </div>
       <div className='relative z-10 w-full max-w-md rounded-3xl bg-gradient-to-b from-white/90 via-white/70 to-white/40 dark:from-zinc-900/90 dark:via-zinc-900/70 dark:to-zinc-900/40 backdrop-blur-xl shadow-2xl p-10 dark:border dark:border-zinc-800'>
-        <h1 className='text-green-600 tracking-tight text-center text-3xl font-extrabold mb-8 bg-clip-text drop-shadow-sm'>
+        <h1 className='text-green-600 tracking-tight text-center text-3xl font-extrabold mb-2 bg-clip-text drop-shadow-sm'>
           {siteName}
         </h1>
-        <form onSubmit={handleSubmit} className='space-y-8'>
-          {shouldAskUsername && (
-            <div>
-              <label htmlFor='username' className='sr-only'>
-                用户名
-              </label>
-              <input
-                id='username'
-                type='text'
-                autoComplete='username'
-                className='block w-full rounded-lg border-0 py-3 px-4 text-gray-900 dark:text-gray-100 shadow-sm ring-1 ring-white/60 dark:ring-white/20 placeholder:text-gray-500 dark:placeholder:text-gray-400 focus:ring-2 focus:ring-green-500 focus:outline-none sm:text-base bg-white/60 dark:bg-zinc-800/60 backdrop-blur'
-                placeholder='输入用户名'
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-              />
-            </div>
-          )}
+        <p className='text-center text-sm text-gray-600 dark:text-gray-400 mb-8'>
+          创建新账号
+        </p>
+        <form onSubmit={handleSubmit} className='space-y-6'>
+          <div>
+            <label htmlFor='username' className='sr-only'>
+              用户名
+            </label>
+            <input
+              id='username'
+              type='text'
+              autoComplete='username'
+              className='block w-full rounded-lg border-0 py-3 px-4 text-gray-900 dark:text-gray-100 shadow-sm ring-1 ring-white/60 dark:ring-white/20 placeholder:text-gray-500 dark:placeholder:text-gray-400 focus:ring-2 focus:ring-green-500 focus:outline-none sm:text-base bg-white/60 dark:bg-zinc-800/60 backdrop-blur'
+              placeholder='输入用户名'
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+            />
+          </div>
 
           <div>
             <label htmlFor='password' className='sr-only'>
@@ -269,9 +259,9 @@ function LoginPageClient() {
               <input
                 id='password'
                 type={showPassword ? 'text' : 'password'}
-                autoComplete='current-password'
+                autoComplete='new-password'
                 className='block w-full rounded-lg border-0 py-3 px-4 pr-12 text-gray-900 dark:text-gray-100 shadow-sm ring-1 ring-white/60 dark:ring-white/20 placeholder:text-gray-500 dark:placeholder:text-gray-400 focus:ring-2 focus:ring-green-500 focus:outline-none sm:text-base bg-white/60 dark:bg-zinc-800/60 backdrop-blur'
-                placeholder='输入访问密码'
+                placeholder='输入密码（至少6位）'
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
               />
@@ -289,8 +279,36 @@ function LoginPageClient() {
             </div>
           </div>
 
+          <div>
+            <label htmlFor='confirmPassword' className='sr-only'>
+              确认密码
+            </label>
+            <div className='relative'>
+              <input
+                id='confirmPassword'
+                type={showConfirmPassword ? 'text' : 'password'}
+                autoComplete='new-password'
+                className='block w-full rounded-lg border-0 py-3 px-4 pr-12 text-gray-900 dark:text-gray-100 shadow-sm ring-1 ring-white/60 dark:ring-white/20 placeholder:text-gray-500 dark:placeholder:text-gray-400 focus:ring-2 focus:ring-green-500 focus:outline-none sm:text-base bg-white/60 dark:bg-zinc-800/60 backdrop-blur'
+                placeholder='再次输入密码'
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+              />
+              <button
+                type='button'
+                className='absolute inset-y-0 right-0 flex items-center pr-3 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
+                onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+              >
+                {showConfirmPassword ? (
+                  <EyeOff className='h-5 w-5' />
+                ) : (
+                  <Eye className='h-5 w-5' />
+                )}
+              </button>
+            </div>
+          </div>
+
           {/* Cloudflare Turnstile */}
-          {siteConfig?.LoginRequireTurnstile && siteConfig?.TurnstileSiteKey && (
+          {siteConfig?.RegistrationRequireTurnstile && siteConfig?.TurnstileSiteKey && (
             <div id='turnstile-container' className='flex justify-center'></div>
           )}
 
@@ -298,74 +316,29 @@ function LoginPageClient() {
             <p className='text-sm text-red-600 dark:text-red-400'>{error}</p>
           )}
 
-          {/* 记住密码复选框 */}
-          <div className='flex items-center'>
-            <input
-              id='remember-password'
-              type='checkbox'
-              className='h-4 w-4 rounded border-gray-300 text-green-600 focus:ring-green-500 dark:border-gray-600 dark:bg-gray-700'
-              checked={rememberPassword}
-              onChange={(e) => setRememberPassword(e.target.checked)}
-            />
-            <label
-              htmlFor='remember-password'
-              className='ml-2 block text-sm text-gray-700 dark:text-gray-300'
-            >
-              记住密码
-            </label>
-          </div>
-
-          {/* 登录按钮 */}
+          {/* 注册按钮 */}
           <button
             type='submit'
             disabled={
-              !password || loading || (shouldAskUsername && !username) ||
-              (siteConfig?.LoginRequireTurnstile && !turnstileToken)
+              !username || !password || !confirmPassword || loading ||
+              (siteConfig?.RegistrationRequireTurnstile && !turnstileToken)
             }
             className='inline-flex w-full justify-center rounded-lg bg-green-600 py-3 text-base font-semibold text-white shadow-lg transition-all duration-200 hover:from-green-600 hover:to-blue-600 disabled:cursor-not-allowed disabled:opacity-50'
           >
-            {loading ? '登录中...' : '登录'}
+            {loading ? '注册中...' : '注册'}
           </button>
 
-          {/* 注册按钮 */}
-          {siteConfig?.EnableRegistration && shouldAskUsername && (
-            <div className='text-center'>
-              <button
-                type='button'
-                onClick={() => router.push('/register')}
-                className='text-sm text-green-600 dark:text-green-400 hover:text-green-700 dark:hover:text-green-300 transition-colors'
-              >
-                还没有账号？立即注册
-              </button>
-            </div>
-          )}
-        </form>
-
-        {/* OIDC登录按钮 */}
-        {siteConfig?.EnableOIDCLogin && shouldAskUsername && (
-          <div className='mt-6'>
-            <div className='relative'>
-              <div className='absolute inset-0 flex items-center'>
-                <div className='w-full border-t border-gray-300 dark:border-gray-600'></div>
-              </div>
-              <div className='relative flex justify-center text-sm'>
-                <span className='px-2 bg-white/60 dark:bg-zinc-900/60 text-gray-500 dark:text-gray-400'>
-                  或
-                </span>
-              </div>
-            </div>
+          {/* 返回登录链接 */}
+          <div className='text-center'>
             <button
               type='button'
-              onClick={() => window.location.href = '/api/auth/oidc/login'}
-              className='mt-4 w-full inline-flex justify-center items-center rounded-lg border-2 border-gray-300 dark:border-gray-600 bg-white/60 dark:bg-zinc-800/60 backdrop-blur py-3 text-base font-semibold text-gray-700 dark:text-gray-200 shadow-sm transition-all duration-200 hover:bg-gray-50 dark:hover:bg-zinc-700/60'
+              onClick={() => router.push('/login')}
+              className='text-sm text-green-600 dark:text-green-400 hover:text-green-700 dark:hover:text-green-300 transition-colors'
             >
-              <svg className='w-5 h-5 mr-2' fill='currentColor' viewBox='0 0 20 20'>
-                <path fillRule='evenodd' d='M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z' clipRule='evenodd' />
-              </svg>
-              {siteConfig?.OIDCButtonText || '使用OIDC登录'}
+              已有账号？返回登录
             </button>
           </div>
-        )}
+        </form>
       </div>
 
       {/* 版本信息显示 */}
@@ -374,10 +347,10 @@ function LoginPageClient() {
   );
 }
 
-export default function LoginPage() {
+export default function RegisterPage() {
   return (
     <Suspense fallback={<div>Loading...</div>}>
-      <LoginPageClient />
+      <RegisterPageClient />
     </Suspense>
   );
 }

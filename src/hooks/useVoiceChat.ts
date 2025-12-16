@@ -42,6 +42,7 @@ export function useVoiceChat({
   const audioContextRef = useRef<AudioContext | null>(null);
   const remoteAudioElementsRef = useRef<Map<string, HTMLAudioElement>>(new Map());
   const nextPlayTimeRef = useRef<Map<string, number>>(new Map()); // 跟踪每个用户的下一个播放时间
+  const disconnectionTimersRef = useRef<Map<string, NodeJS.Timeout>>(new Map()); // 跟踪连接断开的定时器
 
   // 服务器中转相关
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -50,8 +51,15 @@ export function useVoiceChat({
   const switchToServerRelayRef = useRef<(() => void) | null>(null);
   const playRemoteStreamRef = useRef<((peerId: string, stream: MediaStream) => void) | null>(null);
 
-  // ICE服务器配置（使用免费的STUN服务器）
+  // ICE服务器配置（使用多个免费的STUN服务器作为备份）
   const iceServers = [
+    // Cloudflare STUN 服务器（主选，全球 CDN）
+    { urls: 'stun:stun.cloudflare.com:3478' },
+    // Numb/Viagenie（备选，老牌稳定服务）
+    { urls: 'stun:stun.numb.viagenie.ca:3478' },
+    // Annatel（备选）
+    { urls: 'stun:stun.annatel.net:3478' },
+    // Google STUN 服务器（最后备选）
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
   ];
@@ -76,12 +84,32 @@ export function useVoiceChat({
     }
   }, []);
 
-  // 停止本地流
+  // 停止本地流（完全停止并释放麦克风）
   const stopLocalStream = useCallback(() => {
     if (localStreamRef.current) {
       localStreamRef.current.getTracks().forEach(track => track.stop());
       localStreamRef.current = null;
       console.log('[VoiceChat] Stopped local stream');
+    }
+  }, []);
+
+  // 禁用本地音频轨道（静音，但不释放麦克风）
+  const muteLocalStream = useCallback(() => {
+    if (localStreamRef.current) {
+      localStreamRef.current.getTracks().forEach(track => {
+        track.enabled = false;
+      });
+      console.log('[VoiceChat] Muted local stream');
+    }
+  }, []);
+
+  // 启用本地音频轨道（取消静音）
+  const unmuteLocalStream = useCallback(() => {
+    if (localStreamRef.current) {
+      localStreamRef.current.getTracks().forEach(track => {
+        track.enabled = true;
+      });
+      console.log('[VoiceChat] Unmuted local stream');
     }
   }, []);
 
@@ -113,16 +141,98 @@ export function useVoiceChat({
       }
     };
 
-    // 连接状态变化
+    // ICE 连接状态变化 - 更准确地反映连接质量
+    pc.oniceconnectionstatechange = () => {
+      console.log('[VoiceChat] ICE connection state with', peerId, ':', pc.iceConnectionState);
+
+      if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
+        // 连接成功，清除断开定时器
+        const timer = disconnectionTimersRef.current.get(peerId);
+        if (timer) {
+          clearTimeout(timer);
+          disconnectionTimersRef.current.delete(peerId);
+        }
+        setIsConnected(true);
+        setIsConnecting(false);
+      } else if (pc.iceConnectionState === 'disconnected') {
+        // 连接断开，但给它5秒恢复时间
+        console.log('[VoiceChat] ICE disconnected for', peerId, ', waiting for recovery...');
+
+        // 清除之前的定时器(如果有)
+        const existingTimer = disconnectionTimersRef.current.get(peerId);
+        if (existingTimer) {
+          clearTimeout(existingTimer);
+        }
+
+        // 设置新的定时器
+        const timer = setTimeout(() => {
+          console.log('[VoiceChat] ICE connection recovery timeout for', peerId);
+          // 5秒后仍未恢复，检查是否所有连接都断开了
+          if (strategy === 'webrtc-fallback' && pc.iceConnectionState === 'disconnected') {
+            // 检查是否还有其他活跃的连接
+            let hasActiveConnection = false;
+            peerConnectionsRef.current.forEach((otherPc, otherPeerId) => {
+              if (otherPeerId !== peerId) {
+                const state = otherPc.iceConnectionState;
+                if (state === 'connected' || state === 'completed' || state === 'checking') {
+                  hasActiveConnection = true;
+                }
+              }
+            });
+
+            // 只有当所有连接都断开时才切换到服务器中转
+            if (!hasActiveConnection) {
+              console.log('[VoiceChat] All ICE connections failed, switching to server relay');
+              switchToServerRelayRef.current?.();
+            } else {
+              console.log('[VoiceChat] Other connections still active, not switching to server relay');
+              // 只关闭这个失败的连接
+              pc.close();
+              peerConnectionsRef.current.delete(peerId);
+            }
+          }
+          disconnectionTimersRef.current.delete(peerId);
+        }, 5000); // 给5秒恢复时间
+
+        disconnectionTimersRef.current.set(peerId, timer);
+      } else if (pc.iceConnectionState === 'failed') {
+        // ICE 连接彻底失败
+        console.log('[VoiceChat] ICE connection failed for', peerId);
+        if (strategy === 'webrtc-fallback') {
+          // 检查是否还有其他活跃的连接
+          let hasActiveConnection = false;
+          peerConnectionsRef.current.forEach((otherPc, otherPeerId) => {
+            if (otherPeerId !== peerId) {
+              const state = otherPc.iceConnectionState;
+              if (state === 'connected' || state === 'completed' || state === 'checking') {
+                hasActiveConnection = true;
+              }
+            }
+          });
+
+          if (!hasActiveConnection) {
+            console.log('[VoiceChat] All ICE connections failed, switching to server relay');
+            switchToServerRelayRef.current?.();
+          } else {
+            console.log('[VoiceChat] Other connections still active, not switching to server relay');
+            // 只关闭这个失败的连接
+            pc.close();
+            peerConnectionsRef.current.delete(peerId);
+          }
+        }
+      }
+    };
+
+    // 连接状态变化 - 作为辅助监控
     pc.onconnectionstatechange = () => {
       console.log('[VoiceChat] Connection state with', peerId, ':', pc.connectionState);
       if (pc.connectionState === 'connected') {
         setIsConnected(true);
         setIsConnecting(false);
-      } else if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') {
-        // WebRTC连接失败，如果策略允许，切换到服务器中转
+      } else if (pc.connectionState === 'failed') {
+        // 只在 failed 状态时切换，不在 disconnected 时切换
         if (strategy === 'webrtc-fallback') {
-          console.log('[VoiceChat] WebRTC failed, falling back to server relay');
+          console.log('[VoiceChat] Connection failed, falling back to server relay');
           switchToServerRelayRef.current?.();
         }
       }
@@ -164,6 +274,12 @@ export function useVoiceChat({
 
   // 清理WebRTC连接
   const cleanupWebRTC = useCallback(() => {
+    // 清除所有断开定时器
+    disconnectionTimersRef.current.forEach((timer) => {
+      clearTimeout(timer);
+    });
+    disconnectionTimersRef.current.clear();
+
     // 关闭所有peer connections
     peerConnectionsRef.current.forEach((pc, peerId) => {
       pc.close();
@@ -382,7 +498,19 @@ export function useVoiceChat({
 
     // 启动服务器中转
     if (isMicEnabled && localStreamRef.current) {
-      startServerRelay();
+      // 确保音频轨道是启用的
+      const tracks = localStreamRef.current.getTracks();
+      const hasEnabledTrack = tracks.some(track => track.enabled && track.readyState === 'live');
+
+      if (hasEnabledTrack) {
+        startServerRelay();
+      } else {
+        console.error('[VoiceChat] Cannot start server relay - no enabled audio tracks');
+        setError('服务器中转启动失败：麦克风未启用');
+      }
+    } else {
+      console.error('[VoiceChat] Cannot start server relay - mic disabled or no stream');
+      setError('服务器中转启动失败：麦克风未开启');
     }
   }, [isMicEnabled, cleanupWebRTC, startServerRelay]);
 
@@ -424,6 +552,17 @@ export function useVoiceChat({
       // 获取当前时间和下一个播放时间
       const currentTime = audioContext.currentTime;
       let nextPlayTime = nextPlayTimeRef.current.get(userId) || currentTime;
+
+      // 检查播放队列是否堆积过多（说明网络延迟导致音频堆积）
+      const MAX_QUEUE_DELAY = 0.5; // 最大允许队列延迟 500ms
+      const queueDelay = nextPlayTime - currentTime;
+
+      if (queueDelay > MAX_QUEUE_DELAY) {
+        // 播放队列堆积太多，丢弃这个音频包并重置队列
+        console.warn(`[VoiceChat] Dropping audio from ${userId} due to queue buildup: ${(queueDelay * 1000).toFixed(0)}ms`);
+        nextPlayTimeRef.current.set(userId, currentTime);
+        return; // 丢弃这个音频包
+      }
 
       // 如果下一个播放时间已经过去，使用当前时间
       if (nextPlayTime < currentTime) {
@@ -475,6 +614,19 @@ export function useVoiceChat({
 
     if (isMicEnabled) {
       // 开启麦克风
+      // 检查是否已经有本地流（可能只是被静音了）
+      if (localStreamRef.current) {
+        // 已有本地流，只需取消静音
+        console.log('[VoiceChat] Unmuting existing local stream');
+        unmuteLocalStream();
+        // 重新启动服务器中转（如果需要）
+        if (strategy === 'server-only' || peerConnectionsRef.current.size === 0) {
+          startServerRelay();
+        }
+        return;
+      }
+
+      // 没有本地流，需要重新获取
       setIsConnecting(true);
       setError(null);
 
@@ -511,18 +663,15 @@ export function useVoiceChat({
           setIsConnecting(false);
         });
     } else {
-      // 关闭麦克风
-      stopLocalStream();
-      cleanupWebRTC();
+      // 关闭麦克风 - 只静音，不断开连接
+      muteLocalStream();
+      // 停止服务器中转（因为不需要发送音频了）
       stopServerRelay();
     }
 
-    return () => {
-      if (!isMicEnabled) {
-        cleanup();
-      }
-    };
-  }, [isMicEnabled, socket, roomId, strategy, members, getLocalStream, stopLocalStream, cleanupWebRTC, stopServerRelay, startServerRelay, cleanup, initiateConnection]);
+    // 不需要 cleanup，因为我们希望保持连接
+    // cleanup 只在房间变化时调用
+  }, [isMicEnabled, socket, roomId, strategy, members, getLocalStream, muteLocalStream, unmuteLocalStream, stopServerRelay, startServerRelay, initiateConnection]);
 
   // 监听喇叭状态变化
   useEffect(() => {
@@ -565,6 +714,11 @@ export function useVoiceChat({
 
     // 服务器中转事件
     const handleAudioChunk = (data: { userId: string; audioData: number[]; sampleRate?: number }) => {
+      // 过滤掉自己发送的音频，避免回声
+      if (data.userId === socket.id) {
+        return;
+      }
+
       if (strategy === 'server-only' || !peerConnectionsRef.current.has(data.userId)) {
         // 只有在服务器中转模式或WebRTC连接失败时才播放服务器中转的音频
         playServerRelayAudio(data.userId, data.audioData, data.sampleRate || 16000);

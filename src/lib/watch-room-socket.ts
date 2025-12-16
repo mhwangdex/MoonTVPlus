@@ -212,13 +212,14 @@ class WatchRoomSocketManager {
         // eslint-disable-next-line no-console
         console.warn('[WatchRoom] Heartbeat timeout detected, last response was', timeSinceLastResponse, 'ms ago');
 
-        // 尝试重连
-        if (this.socket) {
-          this.socket.disconnect();
-          this.socket.connect();
-          // 重置心跳响应时间，避免重复触发
-          this.lastHeartbeatResponse = Date.now();
-        }
+        // 不要强制断开连接，让 Socket.IO 的自动重连机制处理
+        // Socket.IO 会自动检测连接问题并尝试重连
+        // 只记录警告，不主动断开
+        // eslint-disable-next-line no-console
+        console.warn('[WatchRoom] Waiting for Socket.IO auto-reconnect mechanism');
+
+        // 重置心跳响应时间，避免重复触发警告
+        this.lastHeartbeatResponse = Date.now();
       }
     }, 3000);
   }

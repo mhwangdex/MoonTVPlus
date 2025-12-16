@@ -67,8 +67,34 @@ async function generateAuthCookie(
   return encodeURIComponent(JSON.stringify(authData));
 }
 
+// 验证Cloudflare Turnstile Token
+async function verifyTurnstileToken(token: string, secretKey: string): Promise<boolean> {
+  try {
+    const response = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        secret: secretKey,
+        response: token,
+      }),
+    });
+
+    const data = await response.json();
+    return data.success === true;
+  } catch (error) {
+    console.error('Turnstile验证失败:', error);
+    return false;
+  }
+}
+
 export async function POST(req: NextRequest) {
   try {
+    // 获取站点配置
+    const adminConfig = await getConfig();
+    const siteConfig = adminConfig.SiteConfig;
+
     // 本地 / localStorage 模式——仅校验固定密码
     if (STORAGE_TYPE === 'localstorage') {
       const envPassword = process.env.PASSWORD;
@@ -124,13 +150,40 @@ export async function POST(req: NextRequest) {
     }
 
     // 数据库 / redis 模式——校验用户名并尝试连接数据库
-    const { username, password } = await req.json();
+    const { username, password, turnstileToken } = await req.json();
 
     if (!username || typeof username !== 'string') {
       return NextResponse.json({ error: '用户名不能为空' }, { status: 400 });
     }
     if (!password || typeof password !== 'string') {
       return NextResponse.json({ error: '密码不能为空' }, { status: 400 });
+    }
+
+    // 如果开启了Turnstile验证
+    if (siteConfig.LoginRequireTurnstile) {
+      if (!turnstileToken) {
+        return NextResponse.json(
+          { error: '请完成人机验证' },
+          { status: 400 }
+        );
+      }
+
+      if (!siteConfig.TurnstileSecretKey) {
+        console.error('Turnstile Secret Key未配置');
+        return NextResponse.json(
+          { error: '服务器配置错误' },
+          { status: 500 }
+        );
+      }
+
+      // 验证Turnstile Token
+      const isValid = await verifyTurnstileToken(turnstileToken, siteConfig.TurnstileSecretKey);
+      if (!isValid) {
+        return NextResponse.json(
+          { error: '人机验证失败，请重试' },
+          { status: 400 }
+        );
+      }
     }
 
     // 可能是站长，直接读环境变量

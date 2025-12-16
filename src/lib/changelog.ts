@@ -11,6 +11,23 @@ export interface ChangelogEntry {
 
 export const changelog: ChangelogEntry[] = [
   {
+    version: '202.0.0',
+    date: '2025-12-14',
+	 added: [
+		'新增离线下载功能',
+		'增加注册功能',
+		'增加oidc登录功能',
+		'增加自定义主题'
+    ],
+    changed: [
+      '视频下载现在支持选集下载',
+    ],
+    fixed: [
+	    '修复webrtc连接容易断开的问题',
+		'修复语音聊天中转模式回声'
+	]
+	},
+	{
     version: '201.0.1',
     date: '2025-12-10',
 	 added: [

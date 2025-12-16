@@ -32,6 +32,7 @@ import {
   ExternalLink,
   FileText,
   FolderOpen,
+  Palette,
   Settings,
   Tv,
   Users,
@@ -296,6 +297,21 @@ interface SiteConfig {
   DanmakuApiBase: string;
   DanmakuApiToken: string;
   EnableComments: boolean;
+  EnableRegistration?: boolean;
+  RegistrationRequireTurnstile?: boolean;
+  LoginRequireTurnstile?: boolean;
+  TurnstileSiteKey?: string;
+  TurnstileSecretKey?: string;
+  DefaultUserTags?: string[];
+  EnableOIDCLogin?: boolean;
+  EnableOIDCRegistration?: boolean;
+  OIDCIssuer?: string;
+  OIDCAuthorizationEndpoint?: string;
+  OIDCTokenEndpoint?: string;
+  OIDCUserInfoEndpoint?: string;
+  OIDCClientId?: string;
+  OIDCClientSecret?: string;
+  OIDCButtonText?: string;
 }
 
 // 视频源数据类型
@@ -4235,6 +4251,322 @@ const ConfigFileComponent = ({
   );
 };
 
+// 主题配置组件
+const ThemeConfigComponent = ({
+  config,
+  refreshConfig,
+}: {
+  config: AdminConfig | null;
+  refreshConfig: () => Promise<void>;
+}) => {
+  const { alertModal, showAlert, hideAlert } = useAlertModal();
+  const { isLoading, withLoading } = useLoadingState();
+  const [themeSettings, setThemeSettings] = useState({
+    enableBuiltInTheme: false,
+    builtInTheme: 'default',
+    customCSS: '',
+    enableCache: true,
+    cacheMinutes: 1440, // 默认1天（1440分钟）
+  });
+
+  useEffect(() => {
+    if (config?.ThemeConfig) {
+      setThemeSettings({
+        enableBuiltInTheme: config.ThemeConfig.enableBuiltInTheme || false,
+        builtInTheme: config.ThemeConfig.builtInTheme || 'default',
+        customCSS: config.ThemeConfig.customCSS || '',
+        enableCache: config.ThemeConfig.enableCache !== false,
+        cacheMinutes: config.ThemeConfig.cacheMinutes || 1440,
+      });
+    }
+  }, [config]);
+
+  const handleSave = async () => {
+    await withLoading('saveThemeConfig', async () => {
+      try {
+        const response = await fetch('/api/admin/theme', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(themeSettings),
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+          throw new Error(data.error || '保存失败');
+        }
+
+        showAlert({
+          type: 'success',
+          title: '保存成功',
+          message: '主题配置已更新',
+          timer: 2000,
+        });
+
+        await refreshConfig();
+
+        // 刷新页面以应用新主题
+        setTimeout(() => {
+          window.location.reload();
+        }, 1000);
+      } catch (error) {
+        showAlert({
+          type: 'error',
+          title: '保存失败',
+          message: (error as Error).message,
+        });
+      }
+    });
+  };
+
+  const builtInThemes = [
+    {
+      value: 'default',
+      label: '默认主题',
+      color: '#3b82f6',
+    },
+    {
+      value: 'dark_blue',
+      label: '深蓝夜空',
+      color: '#3b82f6',
+    },
+    {
+      value: 'purple_dream',
+      label: '紫色梦境',
+      color: '#a78bfa',
+    },
+    {
+      value: 'green_forest',
+      label: '翠绿森林',
+      color: '#10b981',
+    },
+    {
+      value: 'orange_sunset',
+      label: '橙色日落',
+      color: '#f97316',
+    },
+    {
+      value: 'pink_candy',
+      label: '粉色糖果',
+      color: '#ec4899',
+    },
+    {
+      value: 'cyan_ocean',
+      label: '青色海洋',
+      color: '#06b6d4',
+    },
+  ];
+
+  return (
+    <div className='space-y-6'>
+      {/* 主题类型选择 */}
+      <div className='bg-white dark:bg-gray-800 rounded-lg p-6 border border-gray-200 dark:border-gray-700'>
+        <h3 className='text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4'>
+          主题类型
+        </h3>
+        <div className='space-y-4'>
+          <label className='flex items-center space-x-3 cursor-pointer'>
+            <input
+              type='radio'
+              checked={!themeSettings.enableBuiltInTheme}
+              onChange={() =>
+                setThemeSettings((prev) => ({
+                  ...prev,
+                  enableBuiltInTheme: false,
+                }))
+              }
+              className='w-4 h-4 text-blue-600'
+            />
+            <span className='text-gray-900 dark:text-gray-100'>
+              自定义CSS（使用下方的CSS编辑器）
+            </span>
+          </label>
+          <label className='flex items-center space-x-3 cursor-pointer'>
+            <input
+              type='radio'
+              checked={themeSettings.enableBuiltInTheme}
+              onChange={() =>
+                setThemeSettings((prev) => ({
+                  ...prev,
+                  enableBuiltInTheme: true,
+                }))
+              }
+              className='w-4 h-4 text-blue-600'
+            />
+            <span className='text-gray-900 dark:text-gray-100'>
+              内置主题（使用预设的主题样式）
+            </span>
+          </label>
+        </div>
+      </div>
+
+      {/* 内置主题选择 */}
+      {themeSettings.enableBuiltInTheme && (
+        <div className='bg-white dark:bg-gray-800 rounded-lg p-6 border border-gray-200 dark:border-gray-700'>
+          <h3 className='text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4'>
+            选择内置主题
+          </h3>
+          <div className='flex flex-wrap gap-3'>
+            {builtInThemes.map((theme) => (
+              <div
+                key={theme.value}
+                onClick={() =>
+                  setThemeSettings((prev) => ({
+                    ...prev,
+                    builtInTheme: theme.value,
+                  }))
+                }
+                className={`cursor-pointer rounded-lg border-2 p-3 transition-all hover:shadow-md ${
+                  themeSettings.builtInTheme === theme.value
+                    ? 'border-blue-500 ring-2 ring-blue-200 dark:ring-blue-800 bg-blue-50 dark:bg-blue-900/20'
+                    : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'
+                }`}
+              >
+                <div className='flex items-center gap-3'>
+                  {/* 圆形颜色预览 */}
+                  <div
+                    className='w-10 h-10 rounded-full flex-shrink-0 shadow-sm'
+                    style={{ backgroundColor: theme.color }}
+                  />
+                  {/* 主题名称 */}
+                  <div className='flex items-center gap-2'>
+                    <span className='text-sm font-medium text-gray-900 dark:text-gray-100 whitespace-nowrap'>
+                      {theme.label}
+                    </span>
+                    {themeSettings.builtInTheme === theme.value && (
+                      <div className='w-4 h-4 rounded-full bg-blue-500 flex items-center justify-center flex-shrink-0'>
+                        <svg
+                          className='w-2.5 h-2.5 text-white'
+                          fill='none'
+                          stroke='currentColor'
+                          viewBox='0 0 24 24'
+                        >
+                          <path
+                            strokeLinecap='round'
+                            strokeLinejoin='round'
+                            strokeWidth={3}
+                            d='M5 13l4 4L19 7'
+                          />
+                        </svg>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+          <p className='mt-4 text-sm text-gray-600 dark:text-gray-400'>
+            注意：启用内置主题时，自定义CSS将被禁用
+          </p>
+        </div>
+      )}
+
+      {/* 自定义CSS编辑器 */}
+      {!themeSettings.enableBuiltInTheme && (
+        <div className='bg-white dark:bg-gray-800 rounded-lg p-6 border border-gray-200 dark:border-gray-700'>
+          <h3 className='text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4'>
+            自定义CSS
+          </h3>
+          <textarea
+            value={themeSettings.customCSS}
+            onChange={(e) =>
+              setThemeSettings((prev) => ({
+                ...prev,
+                customCSS: e.target.value,
+              }))
+            }
+            placeholder='在此输入自定义CSS代码...'
+            className='w-full h-96 px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 font-mono text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent'
+          />
+          <p className='mt-2 text-sm text-gray-600 dark:text-gray-400'>
+            提示：可以使用CSS变量、媒体查询等高级特性
+          </p>
+        </div>
+      )}
+
+      {/* 缓存设置 */}
+      <div className='bg-white dark:bg-gray-800 rounded-lg p-6 border border-gray-200 dark:border-gray-700'>
+        <h3 className='text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4'>
+          缓存设置
+        </h3>
+        <div className='space-y-4'>
+          <label className='flex items-center space-x-3 cursor-pointer'>
+            <input
+              type='checkbox'
+              checked={themeSettings.enableCache}
+              onChange={(e) =>
+                setThemeSettings((prev) => ({
+                  ...prev,
+                  enableCache: e.target.checked,
+                }))
+              }
+              className='w-4 h-4 text-blue-600 rounded'
+            />
+            <span className='text-gray-900 dark:text-gray-100'>
+              启用浏览器缓存（推荐）
+            </span>
+          </label>
+
+          {themeSettings.enableCache && (
+            <div>
+              <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'>
+                缓存时间（分钟）
+              </label>
+              <input
+                type='number'
+                min='1'
+                max='43200'
+                value={themeSettings.cacheMinutes}
+                onChange={(e) =>
+                  setThemeSettings((prev) => ({
+                    ...prev,
+                    cacheMinutes: parseInt(e.target.value) || 1440,
+                  }))
+                }
+                className='w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-blue-500 focus:border-transparent'
+              />
+              <p className='mt-2 text-sm text-gray-600 dark:text-gray-400'>
+                建议值：60分钟（1小时）、1440分钟（1天）、10080分钟（7天）
+              </p>
+            </div>
+          )}
+        </div>
+        <p className='mt-4 text-sm text-gray-600 dark:text-gray-400'>
+          启用后，用户浏览器会缓存CSS文件指定时间，减少服务器负载。启用该项可能会导致主题更新延迟。
+        </p>
+      </div>
+
+      {/* 保存按钮 */}
+      <div className='flex justify-end'>
+        <button
+          onClick={handleSave}
+          disabled={isLoading('saveThemeConfig')}
+          className={
+            isLoading('saveThemeConfig')
+              ? buttonStyles.disabled
+              : buttonStyles.success
+          }
+        >
+          {isLoading('saveThemeConfig') ? '保存中...' : '保存主题配置'}
+        </button>
+      </div>
+
+      {/* 弹窗 */}
+      <AlertModal
+        isOpen={alertModal.isOpen}
+        onClose={hideAlert}
+        type={alertModal.type}
+        title={alertModal.title}
+        message={alertModal.message}
+        timer={alertModal.timer}
+        showConfirm={alertModal.showConfirm}
+      />
+    </div>
+  );
+};
+
 // 新增站点配置组件
 const SiteConfigComponent = ({
   config,
@@ -4260,6 +4592,21 @@ const SiteConfigComponent = ({
     DanmakuApiBase: 'http://localhost:9321',
     DanmakuApiToken: '87654321',
     EnableComments: false,
+    EnableRegistration: false,
+    RegistrationRequireTurnstile: false,
+    LoginRequireTurnstile: false,
+    TurnstileSiteKey: '',
+    TurnstileSecretKey: '',
+    DefaultUserTags: [],
+    EnableOIDCLogin: false,
+    EnableOIDCRegistration: false,
+    OIDCIssuer: '',
+    OIDCAuthorizationEndpoint: '',
+    OIDCTokenEndpoint: '',
+    OIDCUserInfoEndpoint: '',
+    OIDCClientId: '',
+    OIDCClientSecret: '',
+    OIDCButtonText: '',
   });
 
   // 豆瓣数据源相关状态
@@ -4327,6 +4674,21 @@ const SiteConfigComponent = ({
           config.SiteConfig.DanmakuApiBase || 'http://localhost:9321',
         DanmakuApiToken: config.SiteConfig.DanmakuApiToken || '87654321',
         EnableComments: config.SiteConfig.EnableComments || false,
+        EnableRegistration: config.SiteConfig.EnableRegistration || false,
+        RegistrationRequireTurnstile: config.SiteConfig.RegistrationRequireTurnstile || false,
+        LoginRequireTurnstile: config.SiteConfig.LoginRequireTurnstile || false,
+        TurnstileSiteKey: config.SiteConfig.TurnstileSiteKey || '',
+        TurnstileSecretKey: config.SiteConfig.TurnstileSecretKey || '',
+        DefaultUserTags: config.SiteConfig.DefaultUserTags || [],
+        EnableOIDCLogin: config.SiteConfig.EnableOIDCLogin || false,
+        EnableOIDCRegistration: config.SiteConfig.EnableOIDCRegistration || false,
+        OIDCIssuer: config.SiteConfig.OIDCIssuer || '',
+        OIDCAuthorizationEndpoint: config.SiteConfig.OIDCAuthorizationEndpoint || '',
+        OIDCTokenEndpoint: config.SiteConfig.OIDCTokenEndpoint || '',
+        OIDCUserInfoEndpoint: config.SiteConfig.OIDCUserInfoEndpoint || '',
+        OIDCClientId: config.SiteConfig.OIDCClientId || '',
+        OIDCClientSecret: config.SiteConfig.OIDCClientSecret || '',
+        OIDCButtonText: config.SiteConfig.OIDCButtonText || '',
       });
     }
   }, [config]);
@@ -4883,6 +5245,505 @@ const SiteConfigComponent = ({
           </div>
           <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
             开启后将显示豆瓣评论。评论为逆向抓取，请自行承担责任。
+          </p>
+        </div>
+      </div>
+
+      {/* 注册相关配置 */}
+      <div className='space-y-4 pt-4 border-t border-gray-200 dark:border-gray-700'>
+        <h3 className='text-sm font-semibold text-gray-900 dark:text-gray-100'>
+          注册配置
+        </h3>
+
+        {/* 开启注册 */}
+        <div>
+          <div className='flex items-center justify-between'>
+            <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'>
+              开启注册
+            </label>
+            <button
+              type='button'
+              onClick={() =>
+                setSiteSettings((prev) => ({
+                  ...prev,
+                  EnableRegistration: !prev.EnableRegistration,
+                }))
+              }
+              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 ${
+                siteSettings.EnableRegistration
+                  ? buttonStyles.toggleOn
+                  : buttonStyles.toggleOff
+              }`}
+            >
+              <span
+                className={`inline-block h-4 w-4 transform rounded-full ${
+                  buttonStyles.toggleThumb
+                } transition-transform ${
+                  siteSettings.EnableRegistration
+                    ? buttonStyles.toggleThumbOn
+                    : buttonStyles.toggleThumbOff
+                }`}
+              />
+            </button>
+          </div>
+          <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
+            开启后登录页面将显示注册按钮，允许用户自行注册账号。
+          </p>
+        </div>
+
+        {/* 注册启用Cloudflare Turnstile */}
+        <div>
+          <div className='flex items-center justify-between'>
+            <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'>
+              注册启用Cloudflare Turnstile
+            </label>
+            <button
+              type='button'
+              onClick={() =>
+                setSiteSettings((prev) => ({
+                  ...prev,
+                  RegistrationRequireTurnstile: !prev.RegistrationRequireTurnstile,
+                }))
+              }
+              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 ${
+                siteSettings.RegistrationRequireTurnstile
+                  ? buttonStyles.toggleOn
+                  : buttonStyles.toggleOff
+              }`}
+            >
+              <span
+                className={`inline-block h-4 w-4 transform rounded-full ${
+                  buttonStyles.toggleThumb
+                } transition-transform ${
+                  siteSettings.RegistrationRequireTurnstile
+                    ? buttonStyles.toggleThumbOn
+                    : buttonStyles.toggleThumbOff
+                }`}
+              />
+            </button>
+          </div>
+          <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
+            开启后注册时需要通过Cloudflare Turnstile人机验证。
+          </p>
+        </div>
+
+        {/* 登录启用Cloudflare Turnstile */}
+        <div>
+          <div className='flex items-center justify-between'>
+            <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'>
+              登录启用Cloudflare Turnstile
+            </label>
+            <button
+              type='button'
+              onClick={() =>
+                setSiteSettings((prev) => ({
+                  ...prev,
+                  LoginRequireTurnstile: !prev.LoginRequireTurnstile,
+                }))
+              }
+              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 ${
+                siteSettings.LoginRequireTurnstile
+                  ? buttonStyles.toggleOn
+                  : buttonStyles.toggleOff
+              }`}
+            >
+              <span
+                className={`inline-block h-4 w-4 transform rounded-full ${
+                  buttonStyles.toggleThumb
+                } transition-transform ${
+                  siteSettings.LoginRequireTurnstile
+                    ? buttonStyles.toggleThumbOn
+                    : buttonStyles.toggleThumbOff
+                }`}
+              />
+            </button>
+          </div>
+          <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
+            开启后登录时需要通过Cloudflare Turnstile人机验证。
+          </p>
+        </div>
+
+        {/* Cloudflare Turnstile Site Key */}
+        <div>
+          <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'>
+            Cloudflare Turnstile Site Key
+          </label>
+          <input
+            type='text'
+            placeholder='请输入Cloudflare Turnstile Site Key'
+            value={siteSettings.TurnstileSiteKey || ''}
+            onChange={(e) =>
+              setSiteSettings((prev) => ({
+                ...prev,
+                TurnstileSiteKey: e.target.value,
+              }))
+            }
+            className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-green-500 focus:border-transparent'
+          />
+          <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
+            在Cloudflare Dashboard中获取的Site Key（公钥）
+          </p>
+        </div>
+
+        {/* Cloudflare Turnstile Secret Key */}
+        <div>
+          <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'>
+            Cloudflare Turnstile Secret Key
+          </label>
+          <input
+            type='password'
+            placeholder='请输入Cloudflare Turnstile Secret Key'
+            value={siteSettings.TurnstileSecretKey || ''}
+            onChange={(e) =>
+              setSiteSettings((prev) => ({
+                ...prev,
+                TurnstileSecretKey: e.target.value,
+              }))
+            }
+            className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-green-500 focus:border-transparent'
+          />
+          <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
+            在Cloudflare Dashboard中获取的Secret Key（私钥），用于服务端验证
+          </p>
+        </div>
+
+        {/* 默认用户组 */}
+        <div>
+          <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'>
+            默认用户组
+          </label>
+          <select
+            value={siteSettings.DefaultUserTags && siteSettings.DefaultUserTags.length > 0 ? siteSettings.DefaultUserTags[0] : ''}
+            onChange={(e) => {
+              const value = e.target.value;
+              setSiteSettings((prev) => ({
+                ...prev,
+                DefaultUserTags: value ? [value] : [],
+              }));
+            }}
+            className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-green-500 focus:border-transparent'
+          >
+            <option value=''>无用户组（无限制）</option>
+            {config?.UserConfig?.Tags && config.UserConfig.Tags.map((tag) => (
+              <option key={tag.name} value={tag.name}>
+                {tag.name}
+                {tag.enabledApis && tag.enabledApis.length > 0
+                  ? ` (${tag.enabledApis.length} 个源)`
+                  : ''}
+              </option>
+            ))}
+          </select>
+          <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
+            新注册的用户将自动分配到选中的用户组，选择"无用户组"为无限制
+          </p>
+        </div>
+      </div>
+
+      {/* OIDC配置 */}
+      <div className='space-y-4 pt-4 border-t border-gray-200 dark:border-gray-700'>
+        <h3 className='text-sm font-semibold text-gray-900 dark:text-gray-100'>
+          OIDC配置
+        </h3>
+
+        {/* 启用OIDC登录 */}
+        <div>
+          <div className='flex items-center justify-between'>
+            <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'>
+              启用OIDC登录
+            </label>
+            <button
+              type='button'
+              onClick={() =>
+                setSiteSettings((prev) => ({
+                  ...prev,
+                  EnableOIDCLogin: !prev.EnableOIDCLogin,
+                }))
+              }
+              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 ${
+                siteSettings.EnableOIDCLogin
+                  ? buttonStyles.toggleOn
+                  : buttonStyles.toggleOff
+              }`}
+            >
+              <span
+                className={`inline-block h-4 w-4 transform rounded-full ${
+                  buttonStyles.toggleThumb
+                } transition-transform ${
+                  siteSettings.EnableOIDCLogin
+                    ? buttonStyles.toggleThumbOn
+                    : buttonStyles.toggleThumbOff
+                }`}
+              />
+            </button>
+          </div>
+          <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
+            开启后登录页面将显示OIDC登录按钮
+          </p>
+        </div>
+
+        {/* 启用OIDC注册 */}
+        <div>
+          <div className='flex items-center justify-between'>
+            <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'>
+              启用OIDC注册
+            </label>
+            <button
+              type='button'
+              onClick={() =>
+                setSiteSettings((prev) => ({
+                  ...prev,
+                  EnableOIDCRegistration: !prev.EnableOIDCRegistration,
+                }))
+              }
+              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 ${
+                siteSettings.EnableOIDCRegistration
+                  ? buttonStyles.toggleOn
+                  : buttonStyles.toggleOff
+              }`}
+            >
+              <span
+                className={`inline-block h-4 w-4 transform rounded-full ${
+                  buttonStyles.toggleThumb
+                } transition-transform ${
+                  siteSettings.EnableOIDCRegistration
+                    ? buttonStyles.toggleThumbOn
+                    : buttonStyles.toggleThumbOff
+                }`}
+              />
+            </button>
+          </div>
+          <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
+            开启后允许通过OIDC方式注册新用户（需要先启用OIDC登录）
+          </p>
+        </div>
+
+        {/* OIDC Issuer */}
+        <div>
+          <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'>
+            OIDC Issuer URL（可选）
+          </label>
+          <div className='flex flex-col sm:flex-row gap-2'>
+            <input
+              type='text'
+              placeholder='https://your-oidc-provider.com/realms/your-realm'
+              value={siteSettings.OIDCIssuer || ''}
+              onChange={(e) =>
+                setSiteSettings((prev) => ({
+                  ...prev,
+                  OIDCIssuer: e.target.value,
+                }))
+              }
+              className='flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-green-500 focus:border-transparent'
+            />
+            <button
+              type='button'
+              onClick={async () => {
+                if (!siteSettings.OIDCIssuer) {
+                  showError('请先输入Issuer URL', showAlert);
+                  return;
+                }
+
+                await withLoading('oidcDiscover', async () => {
+                  try {
+                    const res = await fetch('/api/admin/oidc-discover', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ issuerUrl: siteSettings.OIDCIssuer }),
+                    });
+
+                    if (!res.ok) {
+                      const data = await res.json().catch(() => ({}));
+                      throw new Error(data.error || '获取配置失败');
+                    }
+
+                    const data = await res.json();
+                    setSiteSettings((prev) => ({
+                      ...prev,
+                      OIDCAuthorizationEndpoint: data.authorization_endpoint || '',
+                      OIDCTokenEndpoint: data.token_endpoint || '',
+                      OIDCUserInfoEndpoint: data.userinfo_endpoint || '',
+                    }));
+                    showSuccess('自动发现成功', showAlert);
+                  } catch (error) {
+                    const errorMessage = error instanceof Error ? error.message : '自动发现失败，请手动配置端点';
+                    showError(errorMessage, showAlert);
+                    throw error;
+                  }
+                });
+              }}
+              disabled={isLoading('oidcDiscover')}
+              className={`px-4 py-2 ${isLoading('oidcDiscover') ? buttonStyles.disabled : buttonStyles.primary} rounded-lg whitespace-nowrap sm:w-auto w-full`}
+            >
+              {isLoading('oidcDiscover') ? '发现中...' : '自动发现'}
+            </button>
+          </div>
+          <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
+            OIDC提供商的Issuer URL，填写后可点击"自动发现"按钮自动获取端点配置
+          </p>
+        </div>
+
+        {/* Authorization Endpoint */}
+        <div>
+          <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'>
+            Authorization Endpoint（授权端点）
+          </label>
+          <input
+            type='text'
+            placeholder='https://your-oidc-provider.com/realms/your-realm/protocol/openid-connect/auth'
+            value={siteSettings.OIDCAuthorizationEndpoint || ''}
+            onChange={(e) =>
+              setSiteSettings((prev) => ({
+                ...prev,
+                OIDCAuthorizationEndpoint: e.target.value,
+              }))
+            }
+            className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-green-500 focus:border-transparent'
+          />
+          <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
+            用户授权的端点URL
+          </p>
+        </div>
+
+        {/* Token Endpoint */}
+        <div>
+          <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'>
+            Token Endpoint（Token端点）
+          </label>
+          <input
+            type='text'
+            placeholder='https://your-oidc-provider.com/realms/your-realm/protocol/openid-connect/token'
+            value={siteSettings.OIDCTokenEndpoint || ''}
+            onChange={(e) =>
+              setSiteSettings((prev) => ({
+                ...prev,
+                OIDCTokenEndpoint: e.target.value,
+              }))
+            }
+            className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-green-500 focus:border-transparent'
+          />
+          <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
+            交换授权码获取token的端点URL
+          </p>
+        </div>
+
+        {/* UserInfo Endpoint */}
+        <div>
+          <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'>
+            UserInfo Endpoint（用户信息端点）
+          </label>
+          <input
+            type='text'
+            placeholder='https://your-oidc-provider.com/realms/your-realm/protocol/openid-connect/userinfo'
+            value={siteSettings.OIDCUserInfoEndpoint || ''}
+            onChange={(e) =>
+              setSiteSettings((prev) => ({
+                ...prev,
+                OIDCUserInfoEndpoint: e.target.value,
+              }))
+            }
+            className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-green-500 focus:border-transparent'
+          />
+          <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
+            获取用户信息的端点URL
+          </p>
+        </div>
+
+        {/* OIDC Client ID */}
+        <div>
+          <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'>
+            OIDC Client ID
+          </label>
+          <input
+            type='text'
+            placeholder='请输入Client ID'
+            value={siteSettings.OIDCClientId || ''}
+            onChange={(e) =>
+              setSiteSettings((prev) => ({
+                ...prev,
+                OIDCClientId: e.target.value,
+              }))
+            }
+            className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-green-500 focus:border-transparent'
+          />
+          <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
+            在OIDC提供商处注册应用后获得的Client ID
+          </p>
+        </div>
+
+        {/* OIDC Client Secret */}
+        <div>
+          <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'>
+            OIDC Client Secret
+          </label>
+          <input
+            type='password'
+            placeholder='请输入Client Secret'
+            value={siteSettings.OIDCClientSecret || ''}
+            onChange={(e) =>
+              setSiteSettings((prev) => ({
+                ...prev,
+                OIDCClientSecret: e.target.value,
+              }))
+            }
+            className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-green-500 focus:border-transparent'
+          />
+          <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
+            在OIDC提供商处注册应用后获得的Client Secret
+          </p>
+        </div>
+
+        {/* OIDC Redirect URI - 只读显示 */}
+        <div>
+          <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'>
+            OIDC Redirect URI（回调地址）
+          </label>
+          <div className='relative'>
+            <input
+              type='text'
+              readOnly
+              value={
+                typeof window !== 'undefined'
+                  ? `${(window as any).RUNTIME_CONFIG?.SITE_BASE || window.location.origin}/api/auth/oidc/callback`
+                  : ''
+              }
+              className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-gray-50 dark:bg-gray-900 text-gray-700 dark:text-gray-300 cursor-default'
+            />
+            <button
+              type='button'
+              onClick={() => {
+                const uri = `${(window as any).RUNTIME_CONFIG?.SITE_BASE || window.location.origin}/api/auth/oidc/callback`;
+                navigator.clipboard.writeText(uri);
+                showSuccess('已复制到剪贴板', showAlert);
+              }}
+              className='absolute right-2 top-1/2 -translate-y-1/2 px-3 py-1 text-xs bg-green-600 text-white rounded hover:bg-green-700 transition-colors'
+            >
+              复制
+            </button>
+          </div>
+          <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
+            这是系统自动生成的回调地址，基于环境变量SITE_BASE。请在OIDC提供商（如Keycloak、Auth0等）的应用配置中添加此地址作为允许的重定向URI
+          </p>
+        </div>
+
+        {/* OIDC登录按钮文字 */}
+        <div>
+          <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'>
+            OIDC登录按钮文字
+          </label>
+          <input
+            type='text'
+            placeholder='使用OIDC登录'
+            value={siteSettings.OIDCButtonText || ''}
+            onChange={(e) =>
+              setSiteSettings((prev) => ({
+                ...prev,
+                OIDCButtonText: e.target.value,
+              }))
+            }
+            className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-green-500 focus:border-transparent'
+          />
+          <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
+            自定义OIDC登录按钮显示的文字，如"使用企业账号登录"、"使用SSO登录"等。留空则显示默认文字"使用OIDC登录"
           </p>
         </div>
       </div>
@@ -5869,6 +6730,7 @@ function AdminPageClient() {
     configFile: false,
     dataMigration: false,
     customAdFilter: false,
+    themeConfig: false,
   });
 
   // 获取管理员配置
@@ -6014,6 +6876,21 @@ function AdminPageClient() {
             onToggle={() => toggleTab('siteConfig')}
           >
             <SiteConfigComponent config={config} refreshConfig={fetchConfig} />
+          </CollapsibleTab>
+
+          {/* 主题配置标签 */}
+          <CollapsibleTab
+            title='主题配置'
+            icon={
+              <Palette
+                size={20}
+                className='text-gray-600 dark:text-gray-400'
+              />
+            }
+            isExpanded={expandedTabs.themeConfig}
+            onToggle={() => toggleTab('themeConfig')}
+          >
+            <ThemeConfigComponent config={config} refreshConfig={fetchConfig} />
           </CollapsibleTab>
 
           <div className='space-y-4'>

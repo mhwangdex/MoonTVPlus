@@ -7,7 +7,7 @@
 > 🎬 **MoonTVPlus** 是基于 [MoonTV v100](https://github.com/MoonTechLab/LunaTV) 二次开发的增强版影视聚合播放器。它在原版基础上新增了外部播放器支持、视频超分、弹幕系统、评论抓取等实用功能，提供更强大的观影体验。
 
 <div align="center">
-
+  
 ![Next.js](https://img.shields.io/badge/Next.js-14-000?logo=nextdotjs)
 ![TailwindCSS](https://img.shields.io/badge/TailwindCSS-3-38bdf8?logo=tailwindcss)
 ![TypeScript](https://img.shields.io/badge/TypeScript-4.x-3178c6?logo=typescript)
@@ -28,6 +28,7 @@
 - 🪒**自定义去广告**：你可以自定义你的去广告代码，实现更强力的去广告功能
 - 🎭 **观影室**：支持多人同步观影、实时聊天、语音通话等功能（实验性）。
 - 📥 **M3U8完整下载**：通过合并m3u8片段实现完整视频下载。
+- 💾 **服务器离线下载**：支持在服务器端下载视频文件，支持断点续传，提前下载到家秒加载 。
 
 ## ✨ 功能特性
 
@@ -250,8 +251,10 @@ dockge/komodo 等 docker compose UI 也有自动更新功能
 | NEXT_PUBLIC_DANMAKU_CACHE_EXPIRE_MINUTES | 弹幕缓存失效时间（分钟数，设为 0 时不缓存） | 0 或正整数 | 4320（3天） |
 | ENABLE_TVBOX_SUBSCRIBE | 是否启用 TVBOX 订阅功能 | true/false | false |
 | TVBOX_SUBSCRIBE_TOKEN | TVBOX 订阅 API 访问 Token，如启用TVBOX功能必须设置该项 | 任意字符串 | (空) |
-| WATCH_ROOM_ENABLED | 是否启用观影室功能 | true/false | false |
+| WATCH_ROOM_ENABLED | 是否启用观影室功能（vercel部署不支持该功能，后续可能会开发外部服务器） | true/false | false |
 | NEXT_PUBLIC_VOICE_CHAT_STRATEGY | 观影室语音聊天策略 | webrtc-fallback/server-only | webrtc-fallback |
+| NEXT_PUBLIC_ENABLE_OFFLINE_DOWNLOAD | 是否启用服务器离线下载功能（开启后也仅管理员和站长可用） | true/false | false |
+| OFFLINE_DOWNLOAD_DIR | 离线下载文件存储目录 | 任意有效路径 | /data |
 
 NEXT_PUBLIC_DOUBAN_PROXY_TYPE 选项解释：
 

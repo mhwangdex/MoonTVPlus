@@ -6,6 +6,7 @@ import {
   Check,
   ChevronDown,
   Copy,
+  Download,
   ExternalLink,
   KeyRound,
   LogOut,
@@ -26,6 +27,7 @@ import { UpdateStatus } from '@/lib/version_check';
 
 import { useVersionCheck } from './VersionCheckProvider';
 import { VersionPanel } from './VersionPanel';
+import { OfflineDownloadPanel } from './OfflineDownloadPanel';
 
 interface AuthInfo {
   username?: string;
@@ -40,6 +42,7 @@ export const UserMenu: React.FC = () => {
   const [isChangePasswordOpen, setIsChangePasswordOpen] = useState(false);
   const [isSubscribeOpen, setIsSubscribeOpen] = useState(false);
   const [isVersionPanelOpen, setIsVersionPanelOpen] = useState(false);
+  const [isOfflineDownloadPanelOpen, setIsOfflineDownloadPanelOpen] = useState(false);
   const [authInfo, setAuthInfo] = useState<AuthInfo | null>(null);
   const [storageType, setStorageType] = useState<string>('localstorage');
   const [mounted, setMounted] = useState(false);
@@ -52,7 +55,7 @@ export const UserMenu: React.FC = () => {
 
   // Body 滚动锁定 - 使用 overflow 方式避免布局问题
   useEffect(() => {
-    if (isSettingsOpen || isChangePasswordOpen || isSubscribeOpen) {
+    if (isSettingsOpen || isChangePasswordOpen || isSubscribeOpen || isOfflineDownloadPanelOpen) {
       const body = document.body;
       const html = document.documentElement;
 
@@ -71,7 +74,7 @@ export const UserMenu: React.FC = () => {
         html.style.overflow = originalHtmlOverflow;
       };
     }
-  }, [isSettingsOpen, isChangePasswordOpen, isSubscribeOpen]);
+  }, [isSettingsOpen, isChangePasswordOpen, isSubscribeOpen, isOfflineDownloadPanelOpen]);
 
   // 设置相关状态
   const [defaultAggregateSearch, setDefaultAggregateSearch] = useState(true);
@@ -530,6 +533,12 @@ export const UserMenu: React.FC = () => {
   const showAdminPanel =
     authInfo?.role === 'owner' || authInfo?.role === 'admin';
 
+  // 检查是否显示离线下载按钮
+  const showOfflineDownload =
+    (authInfo?.role === 'owner' || authInfo?.role === 'admin') &&
+    typeof window !== 'undefined' &&
+    process.env.NEXT_PUBLIC_ENABLE_OFFLINE_DOWNLOAD === 'true';
+
   // 检查是否显示修改密码按钮
   const showChangePassword =
     authInfo?.role !== 'owner' && storageType !== 'localstorage';
@@ -608,6 +617,20 @@ export const UserMenu: React.FC = () => {
             >
               <Shield className='w-4 h-4 text-gray-500 dark:text-gray-400' />
               <span className='font-medium'>管理面板</span>
+            </button>
+          )}
+
+          {/* 离线下载按钮 */}
+          {showOfflineDownload && (
+            <button
+              onClick={() => {
+                setIsOfflineDownloadPanelOpen(true);
+                setIsOpen(false);
+              }}
+              className='w-full px-3 py-2 text-left flex items-center gap-2.5 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors text-sm'
+            >
+              <Download className='w-4 h-4 text-gray-500 dark:text-gray-400' />
+              <span className='font-medium'>离线下载</span>
             </button>
           )}
 
@@ -1360,6 +1383,12 @@ export const UserMenu: React.FC = () => {
       <VersionPanel
         isOpen={isVersionPanelOpen}
         onClose={() => setIsVersionPanelOpen(false)}
+      />
+
+      {/* 离线下载面板 */}
+      <OfflineDownloadPanel
+        isOpen={isOfflineDownloadPanelOpen}
+        onClose={() => setIsOfflineDownloadPanelOpen(false)}
       />
     </>
   );
