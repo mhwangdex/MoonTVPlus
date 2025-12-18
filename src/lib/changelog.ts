@@ -11,6 +11,22 @@ export interface ChangelogEntry {
 
 export const changelog: ChangelogEntry[] = [
   {
+    version: '203.1.0',
+    date: '2025-12-18',
+	 added: [
+		'直播页面增加超分功能',
+		'直播节目单增加Timeline视图',
+		'直播页面增加外部播放器'
+    ],
+    changed: [
+      '直播观看记录会出现在继续观看列表了',
+      '直播页面切换频道现在地址栏会跟随变化',
+      '直播首次加载节目单改为异步'
+    ],
+    fixed: [
+	]
+	},
+	{
     version: '203.0.0',
     date: '2025-12-17',
 	 added: [
