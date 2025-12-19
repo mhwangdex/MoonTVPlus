@@ -11,6 +11,21 @@ export interface ChangelogEntry {
 
 export const changelog: ChangelogEntry[] = [
   {
+    version: '203.2.0',
+    date: '2025-12-19',
+	 added: [
+		'首页新增短剧推荐',
+		'新增剧集更新检查'
+    ],
+    changed: [
+      '优化弹幕匹配规则',
+      '弹幕请求超时修改为2分钟',
+      '视频加载失败增加提示'
+    ],
+    fixed: [
+	]
+	},
+	{
     version: '203.1.0',
     date: '2025-12-18',
 	 added: [

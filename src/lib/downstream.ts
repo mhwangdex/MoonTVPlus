@@ -16,6 +16,7 @@ interface ApiSearchItem {
   vod_content?: string;
   vod_douban_id?: number;
   type_name?: string;
+  vod_total?: number;
 }
 
 /**
@@ -114,6 +115,8 @@ async function searchWithCache(
         desc: cleanHtmlTags(item.vod_content || ''),
         type_name: item.type_name,
         douban_id: item.vod_douban_id,
+        vod_remarks: item.vod_remarks,
+        vod_total: item.vod_total,
       };
     });
 
@@ -283,6 +286,8 @@ export async function getDetailFromApi(
     desc: cleanHtmlTags(videoDetail.vod_content),
     type_name: videoDetail.type_name,
     douban_id: videoDetail.vod_douban_id,
+    vod_remarks: videoDetail.vod_remarks,
+    vod_total: videoDetail.vod_total,
   };
 }
 
@@ -363,5 +368,7 @@ async function handleSpecialSourceDetail(
     desc: descText,
     type_name: '',
     douban_id: 0,
+    vod_remarks: undefined,
+    vod_total: undefined,
   };
 }

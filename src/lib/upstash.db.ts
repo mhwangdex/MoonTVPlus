@@ -393,6 +393,113 @@ export class UpstashRedisStorage implements IStorage {
       throw new Error('清空数据失败');
     }
   }
+
+  // ---------- 通用键值存储 ----------
+  private globalValueKey(key: string) {
+    return `global:${key}`;
+  }
+
+  async getGlobalValue(key: string): Promise<string | null> {
+    const val = await withRetry(() =>
+      this.client.get(this.globalValueKey(key))
+    );
+    // Upstash 会自动反序列化 JSON，如果值是对象，需要重新序列化为字符串
+    if (val === null) return null;
+    if (typeof val === 'string') return val;
+    // 如果是对象（Upstash 自动反序列化的结果），重新序列化
+    return JSON.stringify(val);
+  }
+
+  async setGlobalValue(key: string, value: string): Promise<void> {
+    await withRetry(() =>
+      this.client.set(this.globalValueKey(key), value)
+    );
+  }
+
+  async deleteGlobalValue(key: string): Promise<void> {
+    await withRetry(() => this.client.del(this.globalValueKey(key)));
+  }
+
+  // ---------- 通知相关 ----------
+  private notificationsKey(userName: string) {
+    return `u:${userName}:notifications`;
+  }
+
+  private lastFavoriteCheckKey(userName: string) {
+    return `u:${userName}:last_fav_check`;
+  }
+
+  async getNotifications(userName: string): Promise<import('./types').Notification[]> {
+    const val = await withRetry(() =>
+      this.client.get(this.notificationsKey(userName))
+    );
+    return val ? (val as import('./types').Notification[]) : [];
+  }
+
+  async addNotification(
+    userName: string,
+    notification: import('./types').Notification
+  ): Promise<void> {
+    const notifications = await this.getNotifications(userName);
+    notifications.unshift(notification); // 新通知放在最前面
+    // 限制通知数量，最多保留100条
+    if (notifications.length > 100) {
+      notifications.splice(100);
+    }
+    await withRetry(() =>
+      this.client.set(this.notificationsKey(userName), notifications)
+    );
+  }
+
+  async markNotificationAsRead(
+    userName: string,
+    notificationId: string
+  ): Promise<void> {
+    const notifications = await this.getNotifications(userName);
+    const notification = notifications.find((n) => n.id === notificationId);
+    if (notification) {
+      notification.read = true;
+      await withRetry(() =>
+        this.client.set(this.notificationsKey(userName), notifications)
+      );
+    }
+  }
+
+  async deleteNotification(
+    userName: string,
+    notificationId: string
+  ): Promise<void> {
+    const notifications = await this.getNotifications(userName);
+    const filtered = notifications.filter((n) => n.id !== notificationId);
+    await withRetry(() =>
+      this.client.set(this.notificationsKey(userName), filtered)
+    );
+  }
+
+  async clearAllNotifications(userName: string): Promise<void> {
+    await withRetry(() => this.client.del(this.notificationsKey(userName)));
+  }
+
+  async getUnreadNotificationCount(userName: string): Promise<number> {
+    const notifications = await this.getNotifications(userName);
+    return notifications.filter((n) => !n.read).length;
+  }
+
+  async getLastFavoriteCheckTime(userName: string): Promise<number> {
+    const val = await withRetry(() =>
+      this.client.get(this.lastFavoriteCheckKey(userName))
+    );
+    return val ? (val as number) : 0;
+  }
+
+  async setLastFavoriteCheckTime(
+    userName: string,
+    timestamp: number
+  ): Promise<void> {
+    await withRetry(() =>
+      this.client.set(this.lastFavoriteCheckKey(userName), timestamp)
+    );
+  }
 }
 
 // 单例 Upstash Redis 客户端

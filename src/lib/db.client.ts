@@ -53,6 +53,8 @@ export interface Favorite {
   save_time: number;
   search_title?: string;
   origin?: 'vod' | 'live';
+  is_completed?: boolean; // 是否已完结
+  vod_remarks?: string; // 视频备注信息
 }
 
 // ---- 缓存数据结构 ----

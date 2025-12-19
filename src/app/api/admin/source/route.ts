@@ -226,6 +226,15 @@ export async function POST(request: NextRequest) {
     // 持久化到存储
     await db.saveAdminConfig(adminConfig);
 
+    // 清除短剧视频源缓存（因为视频源发生了变动）
+    try {
+      await db.deleteGlobalValue('duanju');
+      console.log('已清除短剧视频源缓存');
+    } catch (error) {
+      console.error('清除短剧视频源缓存失败:', error);
+      // 不影响主流程，继续执行
+    }
+
     return NextResponse.json(
       { ok: true },
       {

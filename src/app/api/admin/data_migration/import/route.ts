@@ -85,6 +85,15 @@ export async function POST(req: NextRequest) {
     await db.saveAdminConfig(importData.data.adminConfig);
     await setCachedConfig(importData.data.adminConfig);
 
+    // 清除短剧视频源缓存（因为导入的配置可能包含不同的视频源）
+    try {
+      await db.deleteGlobalValue('duanju');
+      console.log('已清除短剧视频源缓存');
+    } catch (error) {
+      console.error('清除短剧视频源缓存失败:', error);
+      // 不影响主流程，继续执行
+    }
+
     // 导入用户数据
     const userData = importData.data.userData;
     for (const username in userData) {

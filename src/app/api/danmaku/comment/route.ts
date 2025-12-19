@@ -70,7 +70,7 @@ export async function GET(request: NextRequest) {
 
     // 添加超时控制
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 10000); // 10秒超时
+    const timeoutId = setTimeout(() => controller.abort(), 120000); // 2分钟超时
 
     try {
       const response = await fetch(apiUrl, {

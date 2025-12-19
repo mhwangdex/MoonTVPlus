@@ -3,6 +3,7 @@
 'use client';
 
 import {
+  Bell,
   Check,
   ChevronDown,
   Copy,
@@ -17,7 +18,7 @@ import {
   X,
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
 import { getAuthInfoFromBrowserCookie } from '@/lib/auth';
@@ -28,6 +29,7 @@ import { UpdateStatus } from '@/lib/version_check';
 import { useVersionCheck } from './VersionCheckProvider';
 import { VersionPanel } from './VersionPanel';
 import { OfflineDownloadPanel } from './OfflineDownloadPanel';
+import { NotificationPanel } from './NotificationPanel';
 
 interface AuthInfo {
   username?: string;
@@ -43,9 +45,11 @@ export const UserMenu: React.FC = () => {
   const [isSubscribeOpen, setIsSubscribeOpen] = useState(false);
   const [isVersionPanelOpen, setIsVersionPanelOpen] = useState(false);
   const [isOfflineDownloadPanelOpen, setIsOfflineDownloadPanelOpen] = useState(false);
+  const [isNotificationPanelOpen, setIsNotificationPanelOpen] = useState(false);
   const [authInfo, setAuthInfo] = useState<AuthInfo | null>(null);
   const [storageType, setStorageType] = useState<string>('localstorage');
   const [mounted, setMounted] = useState(false);
+  const [unreadCount, setUnreadCount] = useState(0);
 
   // 订阅相关状态
   const [subscribeEnabled, setSubscribeEnabled] = useState(false);
@@ -127,6 +131,70 @@ export const UserMenu: React.FC = () => {
   // 确保组件已挂载
   useEffect(() => {
     setMounted(true);
+  }, []);
+
+  // 加载未读通知数量
+  const loadUnreadCount = async () => {
+    try {
+      const response = await fetch('/api/notifications');
+      if (response.ok) {
+        const data = await response.json();
+        const count = data.unreadCount || 0;
+        setUnreadCount(count);
+        // 同步到全局，让其他 UserMenu 实例也能获取
+        if (typeof window !== 'undefined') {
+          (window as any).__unreadNotificationCount = count;
+        }
+      }
+    } catch (error) {
+      console.error('加载未读通知数量失败:', error);
+    }
+  };
+
+  // 首次加载时检查未读通知数量（使用全局标记避免多个实例重复请求）
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    // 检查是否已经有其他实例在加载
+    const globalWindow = window as any;
+    if (globalWindow.__loadingNotifications) {
+      // 如果正在加载，等待加载完成后获取结果
+      const checkInterval = setInterval(() => {
+        if (!globalWindow.__loadingNotifications && globalWindow.__unreadNotificationCount !== undefined) {
+          setUnreadCount(globalWindow.__unreadNotificationCount);
+          clearInterval(checkInterval);
+        }
+      }, 100);
+      return () => clearInterval(checkInterval);
+    }
+
+    // 检查是否已经加载过
+    if (globalWindow.__unreadNotificationCount !== undefined) {
+      setUnreadCount(globalWindow.__unreadNotificationCount);
+      return;
+    }
+
+    // 标记正在加载
+    globalWindow.__loadingNotifications = true;
+    loadUnreadCount().finally(() => {
+      globalWindow.__loadingNotifications = false;
+    });
+  }, []);
+
+  // 监听通知更新事件
+  useEffect(() => {
+    const handleNotificationsUpdated = () => {
+      // 清除缓存，强制重新加载
+      if (typeof window !== 'undefined') {
+        delete (window as any).__unreadNotificationCount;
+      }
+      loadUnreadCount();
+    };
+
+    window.addEventListener('notificationsUpdated', handleNotificationsUpdated);
+    return () => {
+      window.removeEventListener('notificationsUpdated', handleNotificationsUpdated);
+    };
   }, []);
 
   // 从运行时配置读取订阅是否启用
@@ -600,6 +668,23 @@ export const UserMenu: React.FC = () => {
 
         {/* 菜单项 */}
         <div className='py-1'>
+          {/* 通知按钮 */}
+          <button
+            onClick={() => {
+              setIsOpen(false);
+              setIsNotificationPanelOpen(true);
+            }}
+            className='w-full px-3 py-2 text-left flex items-center gap-2.5 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors text-sm relative'
+          >
+            <Bell className='w-4 h-4 text-gray-500 dark:text-gray-400' />
+            <span className='font-medium'>通知中心</span>
+            {unreadCount > 0 && (
+              <span className='ml-auto px-2 py-0.5 text-xs font-medium bg-red-500 text-white rounded-full'>
+                {unreadCount > 99 ? '99+' : unreadCount}
+              </span>
+            )}
+          </button>
+
           {/* 设置按钮 */}
           <button
             onClick={handleSettings}
@@ -1358,8 +1443,13 @@ export const UserMenu: React.FC = () => {
         >
           <User className='w-full h-full' />
         </button>
+        {/* 版本更新红点 */}
         {updateStatus === UpdateStatus.HAS_UPDATE && (
           <div className='absolute top-[2px] right-[2px] w-2 h-2 bg-yellow-500 rounded-full'></div>
+        )}
+        {/* 未读通知红点 */}
+        {unreadCount > 0 && (
+          <div className='absolute top-[2px] right-[2px] w-2 h-2 bg-red-500 rounded-full'></div>
         )}
       </div>
 
@@ -1390,6 +1480,20 @@ export const UserMenu: React.FC = () => {
         isOpen={isOfflineDownloadPanelOpen}
         onClose={() => setIsOfflineDownloadPanelOpen(false)}
       />
+
+      {/* 使用 Portal 将通知面板渲染到 document.body */}
+      {isNotificationPanelOpen &&
+        mounted &&
+        createPortal(
+          <NotificationPanel
+            isOpen={isNotificationPanelOpen}
+            onClose={() => {
+              setIsNotificationPanelOpen(false);
+              // 不需要在这里刷新，NotificationPanel 内部会触发事件
+            }}
+          />,
+          document.body
+        )}
     </>
   );
 };

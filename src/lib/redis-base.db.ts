@@ -495,4 +495,107 @@ export abstract class BaseRedisStorage implements IStorage {
       throw new Error('清空数据失败');
     }
   }
+
+  // ---------- 通用键值存储 ----------
+  private globalValueKey(key: string) {
+    return `global:${key}`;
+  }
+
+  async getGlobalValue(key: string): Promise<string | null> {
+    const val = await this.withRetry(() =>
+      this.client.get(this.globalValueKey(key))
+    );
+    return val ? ensureString(val) : null;
+  }
+
+  async setGlobalValue(key: string, value: string): Promise<void> {
+    await this.withRetry(() =>
+      this.client.set(this.globalValueKey(key), ensureString(value))
+    );
+  }
+
+  async deleteGlobalValue(key: string): Promise<void> {
+    await this.withRetry(() => this.client.del(this.globalValueKey(key)));
+  }
+
+  // ---------- 通知相关 ----------
+  private notificationsKey(userName: string) {
+    return `u:${userName}:notifications`;
+  }
+
+  private lastFavoriteCheckKey(userName: string) {
+    return `u:${userName}:last_fav_check`;
+  }
+
+  async getNotifications(userName: string): Promise<import('./types').Notification[]> {
+    const val = await this.withRetry(() =>
+      this.client.get(this.notificationsKey(userName))
+    );
+    return val ? (JSON.parse(val) as import('./types').Notification[]) : [];
+  }
+
+  async addNotification(
+    userName: string,
+    notification: import('./types').Notification
+  ): Promise<void> {
+    const notifications = await this.getNotifications(userName);
+    notifications.unshift(notification); // 新通知放在最前面
+    // 限制通知数量，最多保留100条
+    if (notifications.length > 100) {
+      notifications.splice(100);
+    }
+    await this.withRetry(() =>
+      this.client.set(this.notificationsKey(userName), JSON.stringify(notifications))
+    );
+  }
+
+  async markNotificationAsRead(
+    userName: string,
+    notificationId: string
+  ): Promise<void> {
+    const notifications = await this.getNotifications(userName);
+    const notification = notifications.find((n) => n.id === notificationId);
+    if (notification) {
+      notification.read = true;
+      await this.withRetry(() =>
+        this.client.set(this.notificationsKey(userName), JSON.stringify(notifications))
+      );
+    }
+  }
+
+  async deleteNotification(
+    userName: string,
+    notificationId: string
+  ): Promise<void> {
+    const notifications = await this.getNotifications(userName);
+    const filtered = notifications.filter((n) => n.id !== notificationId);
+    await this.withRetry(() =>
+      this.client.set(this.notificationsKey(userName), JSON.stringify(filtered))
+    );
+  }
+
+  async clearAllNotifications(userName: string): Promise<void> {
+    await this.withRetry(() => this.client.del(this.notificationsKey(userName)));
+  }
+
+  async getUnreadNotificationCount(userName: string): Promise<number> {
+    const notifications = await this.getNotifications(userName);
+    return notifications.filter((n) => !n.read).length;
+  }
+
+  async getLastFavoriteCheckTime(userName: string): Promise<number> {
+    const val = await this.withRetry(() =>
+      this.client.get(this.lastFavoriteCheckKey(userName))
+    );
+    return val ? parseInt(val, 10) : 0;
+  }
+
+  async setLastFavoriteCheckTime(
+    userName: string,
+    timestamp: number
+  ): Promise<void> {
+    await this.withRetry(() =>
+      this.client.set(this.lastFavoriteCheckKey(userName), timestamp.toString())
+    );
+  }
 }

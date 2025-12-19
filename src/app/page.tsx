@@ -34,6 +34,7 @@ function HomeClient() {
   const [hotMovies, setHotMovies] = useState<DoubanItem[]>([]);
   const [hotTvShows, setHotTvShows] = useState<DoubanItem[]>([]);
   const [hotVarietyShows, setHotVarietyShows] = useState<DoubanItem[]>([]);
+  const [hotDuanju, setHotDuanju] = useState<any[]>([]);
   const [upcomingContent, setUpcomingContent] = useState<TMDBItem[]>([]);
   const [bangumiCalendarData, setBangumiCalendarData] = useState<
     BangumiCalendarData[]
@@ -56,6 +57,55 @@ function HomeClient() {
     }
   }, [announcement]);
 
+  // 首次进入时检查收藏更新（带前端冷却检查）
+  useEffect(() => {
+    const checkFavoriteUpdates = async () => {
+      try {
+        // 检查冷却时间（前端 localStorage）
+        const COOLDOWN_TIME = 30 * 60 * 1000; // 30分钟
+        const lastCheckTime = localStorage.getItem('lastFavoriteCheckTime');
+        const now = Date.now();
+
+        if (lastCheckTime) {
+          const timeSinceLastCheck = now - parseInt(lastCheckTime, 10);
+          if (timeSinceLastCheck < COOLDOWN_TIME) {
+            const remainingMinutes = Math.ceil((COOLDOWN_TIME - timeSinceLastCheck) / 1000 / 60);
+            console.log(`收藏更新检查冷却中，还需等待 ${remainingMinutes} 分钟`);
+            return;
+          }
+        }
+
+        console.log('开始检查收藏更新...');
+        const response = await fetch('/api/favorites/check-updates', {
+          method: 'POST',
+        });
+
+        if (response.ok) {
+          // 更新本地检查时间
+          localStorage.setItem('lastFavoriteCheckTime', now.toString());
+
+          const data = await response.json();
+          if (data.updates && data.updates.length > 0) {
+            console.log(`发现 ${data.updates.length} 个收藏更新`);
+            // 触发通知更新事件
+            window.dispatchEvent(new Event('notificationsUpdated'));
+          } else {
+            console.log('没有收藏更新');
+          }
+        }
+      } catch (error) {
+        console.error('检查收藏更新失败:', error);
+      }
+    };
+
+    // 延迟3秒后检查，避免影响首页加载
+    const timer = setTimeout(() => {
+      checkFavoriteUpdates();
+    }, 3000);
+
+    return () => clearTimeout(timer);
+  }, []);
+
   // 收藏夹数据
   type FavoriteItem = {
     id: string;
@@ -77,7 +127,7 @@ function HomeClient() {
       try {
         setLoading(true);
 
-        // 并行获取热门电影、热门剧集、热门综艺和番剧日历
+        // 并行获取热门电影、热门剧集、热门综艺、番剧日历和热播短剧
         const [moviesData, tvShowsData, varietyShowsData, bangumiCalendarData] =
           await Promise.all([
             getDoubanCategories({
@@ -103,6 +153,19 @@ function HomeClient() {
         }
 
         setBangumiCalendarData(bangumiCalendarData);
+
+        // 获取热播短剧
+        try {
+          const duanjuResponse = await fetch('/api/duanju/recommends');
+          if (duanjuResponse.ok) {
+            const duanjuResult = await duanjuResponse.json();
+            if (duanjuResult.code === 200 && duanjuResult.data) {
+              setHotDuanju(duanjuResult.data);
+            }
+          }
+        } catch (error) {
+          console.error('获取热播短剧数据失败:', error);
+        }
 
         // 获取即将上映/播出内容（使用后端API缓存）
         try {
@@ -308,6 +371,43 @@ function HomeClient() {
                       ))}
                 </ScrollableRow>
               </section>
+
+              {/* 热播短剧 */}
+              {hotDuanju.length > 0 && (
+                <section className='mb-8'>
+                  <div className='mb-4 flex items-center justify-between'>
+                    <h2 className='text-xl font-bold text-gray-800 dark:text-gray-200'>
+                      热播短剧
+                    </h2>
+                  </div>
+                  <ScrollableRow>
+                    {loading
+                      ? Array.from({ length: 8 }).map((_, index) => (
+                          <div
+                            key={index}
+                            className='min-w-[96px] w-24 sm:min-w-[180px] sm:w-44'
+                          >
+                            <div className='aspect-[2/3] bg-gray-200 dark:bg-gray-700 rounded-lg animate-pulse mb-2' />
+                            <div className='h-4 bg-gray-200 dark:bg-gray-700 rounded animate-pulse w-3/4' />
+                          </div>
+                        ))
+                      : hotDuanju.map((duanju) => (
+                          <div
+                            key={duanju.id + duanju.source}
+                            className='min-w-[96px] w-24 sm:min-w-[180px] sm:w-44'
+                          >
+                            <VideoCard
+                              poster={duanju.poster}
+                              title={duanju.title}
+                              year={duanju.year}
+                              type='tv'
+                              from='douban'
+                            />
+                          </div>
+                        ))}
+                  </ScrollableRow>
+                </section>
+              )}
 
               {/* 每日新番放送 */}
               <section className='mb-8'>
