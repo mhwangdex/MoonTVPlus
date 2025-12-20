@@ -11,6 +11,16 @@ export interface ChangelogEntry {
 
 export const changelog: ChangelogEntry[] = [
   {
+    version: '203.2.1',
+    date: '2025-12-20',
+	 added: [
+    ],
+    changed: [
+    ],
+    fixed: [
+	"修复IOS端换集报错播放器初始化失败"
+	]
+	},{
     version: '203.2.0',
     date: '2025-12-19',
 	 added: [

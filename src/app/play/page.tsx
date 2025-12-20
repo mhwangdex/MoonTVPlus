@@ -1067,7 +1067,7 @@ function PlayPageClient() {
           // 获取当前弹幕设置的快照，避免循环引用
           const currentDanmakuSettings = danmakuSettingsRef.current;
           const danmakuPluginOption = danmakuPluginRef.current.option;
-          
+
           const currentSettings = {
             ...currentDanmakuSettings,
             opacity: danmakuPluginOption.opacity || currentDanmakuSettings.opacity,
@@ -1093,10 +1093,19 @@ function PlayPageClient() {
         artPlayerRef.current.destroy();
         artPlayerRef.current = null;
 
+        // 清空 DOM 容器，确保没有残留元素
+        if (artRef.current) {
+          artRef.current.innerHTML = '';
+        }
+
         console.log('播放器资源已清理');
       } catch (err) {
         console.warn('清理播放器资源时出错:', err);
         artPlayerRef.current = null;
+        // 即使出错也要清空容器
+        if (artRef.current) {
+          artRef.current.innerHTML = '';
+        }
       }
     }
   };
@@ -2920,6 +2929,14 @@ function PlayPageClient() {
     // 异步初始化播放器
     const initPlayer = async () => {
       try {
+        // iOS需要等待DOM完全清理
+        await new Promise(resolve => setTimeout(resolve, 100));
+
+        // 再次确保容器为空
+        if (artRef.current) {
+          artRef.current.innerHTML = '';
+        }
+
         // 动态导入播放器库
         const [ArtplayerModule, HlsModule, DanmukuPlugin] = await Promise.all([
           import('artplayer'),
