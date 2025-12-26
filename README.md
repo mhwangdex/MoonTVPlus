@@ -255,6 +255,7 @@ dockge/komodo 等 docker compose UI 也有自动更新功能
 | NEXT_PUBLIC_VOICE_CHAT_STRATEGY | 观影室语音聊天策略 | webrtc-fallback/server-only | webrtc-fallback |
 | NEXT_PUBLIC_ENABLE_OFFLINE_DOWNLOAD | 是否启用服务器离线下载功能（开启后也仅管理员和站长可用） | true/false | false |
 | OFFLINE_DOWNLOAD_DIR | 离线下载文件存储目录 | 任意有效路径 | /data |
+| VIDEOINFO_CACHE_MINUTES | 私人影库视频信息在内存中的缓存时长（分钟） | 正整数 | 1440（1天） |
 
 NEXT_PUBLIC_DOUBAN_PROXY_TYPE 选项解释：
 

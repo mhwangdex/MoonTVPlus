@@ -45,8 +45,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 修改密码
-    await db.changePassword(username, newPassword);
+    // 修改密码（只更新V2存储）
+    await db.changePasswordV2(username, newPassword);
 
     return NextResponse.json({ ok: true });
   } catch (error) {

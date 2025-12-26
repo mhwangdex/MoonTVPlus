@@ -21,6 +21,11 @@ export interface AdminConfig {
     DanmakuApiToken: string;
     // TMDB配置
     TMDBApiKey?: string;
+    TMDBProxy?: string;
+    // Pansou配置
+    PansouApiUrl?: string;
+    PansouUsername?: string;
+    PansouPassword?: string;
     // 评论功能开关
     EnableComments: boolean;
     // 自定义去广告代码
@@ -89,6 +94,16 @@ export interface AdminConfig {
     enableCache: boolean; // 是否启用浏览器缓存
     cacheMinutes: number; // 缓存时间（分钟）
     cacheVersion: number; // CSS版本号（用于缓存控制）
+  };
+  OpenListConfig?: {
+    Enabled: boolean; // 是否启用私人影库功能
+    URL: string; // OpenList 服务器地址
+    Username: string; // 账号（用于登录获取Token）
+    Password: string; // 密码（用于登录获取Token）
+    RootPath: string; // 根目录路径，默认 "/"
+    LastRefreshTime?: number; // 上次刷新时间戳
+    ResourceCount?: number; // 资源数量
+    ScanInterval?: number; // 定时扫描间隔（分钟），0表示关闭，最低60分钟
   };
 }
 

@@ -40,7 +40,7 @@ export async function GET(request: NextRequest) {
 
     // 添加超时控制和重试机制
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 10000); // 10秒超时
+    const timeoutId = setTimeout(() => controller.abort(), 30000); // 10秒超时
 
     try {
       const response = await fetch(apiUrl, {

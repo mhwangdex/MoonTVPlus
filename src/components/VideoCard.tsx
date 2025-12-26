@@ -659,7 +659,7 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(function VideoCard
               }}
             >
               <div
-                className='bg-black/70 backdrop-blur-sm text-white px-4 py-2 rounded-lg text-sm font-medium shadow-lg'
+                className='bg-black/70 backdrop-blur-sm text-white px-4 py-2 rounded-lg text-xs md:text-sm font-medium shadow-lg'
                 style={{
                   WebkitUserSelect: 'none',
                   userSelect: 'none',

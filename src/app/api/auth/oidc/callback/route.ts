@@ -148,15 +148,41 @@ export async function GET(request: NextRequest) {
     }
 
     // 检查用户是否已存在(通过OIDC sub查找)
-    const existingUser = config.UserConfig.Users.find((u: any) => u.oidcSub === oidcSub);
+    // 优先使用新版本查找
+    let username = await db.getUserByOidcSub(oidcSub);
+    let userRole: 'owner' | 'admin' | 'user' = 'user';
 
-    if (existingUser) {
+    if (username) {
+      // 从新版本获取用户信息
+      const userInfoV2 = await db.getUserInfoV2(username);
+      if (userInfoV2) {
+        userRole = userInfoV2.role;
+        // 检查用户是否被封禁
+        if (userInfoV2.banned) {
+          return NextResponse.redirect(
+            new URL('/login?error=' + encodeURIComponent('用户被封禁'), origin)
+          );
+        }
+      }
+    } else {
+      // 回退到配置中查找
+      const existingUser = config.UserConfig.Users.find((u: any) => u.oidcSub === oidcSub);
+      if (existingUser) {
+        username = existingUser.username;
+        userRole = existingUser.role || 'user';
+        // 检查用户是否被封禁
+        if (existingUser.banned) {
+          return NextResponse.redirect(
+            new URL('/login?error=' + encodeURIComponent('用户被封禁'), origin)
+          );
+        }
+      }
+    }
+
+    if (username) {
       // 用户已存在,直接登录
       const response = NextResponse.redirect(new URL('/', origin));
-      const cookieValue = await generateAuthCookie(
-        existingUser.username,
-        existingUser.role || 'user'
-      );
+      const cookieValue = await generateAuthCookie(username, userRole);
       const expires = new Date();
       expires.setDate(expires.getDate() + 7);
 

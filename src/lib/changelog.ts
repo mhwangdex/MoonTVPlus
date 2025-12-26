@@ -11,6 +11,25 @@ export interface ChangelogEntry {
 
 export const changelog: ChangelogEntry[] = [
   {
+    version: '204.0.0',
+    date: '2025-12-20',
+	added: [
+		"新增私人影视库功能（实验性）",
+		"增加弹幕热力图",
+		"增加盘搜搜索资源"
+    ],
+    changed: [
+		"完全重构用户数据存储结构",
+		"提高所有弹幕接口的超时时间",
+		"优化完结标识判断",
+		"即将上映移动端字体大小调整",
+		"tmdb增加代理支持",
+		"剧集更新检测改为服务器后台定时执行"
+    ],
+    fixed: [
+	]
+	},
+	{
     version: '203.2.2',
     date: '2025-12-20',
 	 added: [
@@ -21,7 +40,8 @@ export const changelog: ChangelogEntry[] = [
 	"修复IOS端换集报错播放器初始化失败",
 	"修复超分切换时重复渲染"
 	]
-	},{
+	},
+	{
     version: '203.2.0',
     date: '2025-12-19',
 	 added: [

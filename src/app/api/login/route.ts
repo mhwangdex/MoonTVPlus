@@ -217,44 +217,69 @@ export async function POST(req: NextRequest) {
 
     const config = await getConfig();
     const user = config.UserConfig.Users.find((u) => u.username === username);
-    if (user && user.banned) {
+
+    // 优先使用新版本的用户验证
+    let pass = false;
+    let userRole: 'owner' | 'admin' | 'user' = 'user';
+    let isBanned = false;
+
+    // 尝试使用新版本验证
+    const userInfoV2 = await db.getUserInfoV2(username);
+
+    if (userInfoV2) {
+      // 使用新版本验证
+      pass = await db.verifyUserV2(username, password);
+      userRole = userInfoV2.role;
+      isBanned = userInfoV2.banned;
+    } else {
+      // 回退到旧版本验证
+      try {
+        pass = await db.verifyUser(username, password);
+        // 从配置中获取角色和封禁状态
+        if (user) {
+          userRole = user.role;
+          isBanned = user.banned || false;
+        }
+      } catch (err) {
+        console.error('数据库验证失败', err);
+        return NextResponse.json({ error: '数据库错误' }, { status: 500 });
+      }
+    }
+
+    // 检查用户是否被封禁
+    if (isBanned) {
       return NextResponse.json({ error: '用户被封禁' }, { status: 401 });
     }
 
-    // 校验用户密码
-    try {
-      const pass = await db.verifyUser(username, password);
-      if (!pass) {
-        return NextResponse.json(
-          { error: '用户名或密码错误' },
-          { status: 401 }
-        );
-      }
-
-      // 验证成功，设置认证cookie
-      const response = NextResponse.json({ ok: true });
-      const cookieValue = await generateAuthCookie(
-        username,
-        password,
-        user?.role || 'user',
-        false
-      ); // 数据库模式不包含 password
-      const expires = new Date();
-      expires.setDate(expires.getDate() + 7); // 7天过期
-
-      response.cookies.set('auth', cookieValue, {
-        path: '/',
-        expires,
-        sameSite: 'lax', // 改为 lax 以支持 PWA
-        httpOnly: false, // PWA 需要客户端可访问
-        secure: false, // 根据协议自动设置
-      });
-
-      return response;
-    } catch (err) {
-      console.error('数据库验证失败', err);
-      return NextResponse.json({ error: '数据库错误' }, { status: 500 });
+    if (!pass) {
+      return NextResponse.json(
+        { error: '用户名或密码错误' },
+        { status: 401 }
+      );
     }
+
+    // 验证成功，设置认证cookie
+    const response = NextResponse.json({ ok: true });
+    const cookieValue = await generateAuthCookie(
+      username,
+      password,
+      userRole,
+      false
+    ); // 数据库模式不包含 password
+    const expires = new Date();
+    expires.setDate(expires.getDate() + 7); // 7天过期
+
+    response.cookies.set('auth', cookieValue, {
+      path: '/',
+      expires,
+      sameSite: 'lax', // 改为 lax 以支持 PWA
+      httpOnly: false, // PWA 需要客户端可访问
+      secure: false, // 根据协议自动设置
+    });
+
+    console.log(`Cookie已设置`);
+
+    return response;
   } catch (error) {
     console.error('登录接口异常', error);
     return NextResponse.json({ error: '服务器错误' }, { status: 500 });

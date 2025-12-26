@@ -34,14 +34,31 @@ export async function GET(request: NextRequest) {
     if (username === process.env.USERNAME) {
       result.Role = 'owner';
     } else {
-      const user = config.UserConfig.Users.find((u) => u.username === username);
-      if (user && user.role === 'admin' && !user.banned) {
-        result.Role = 'admin';
+      // 优先从新版本获取用户信息
+      const { db } = await import('@/lib/db');
+      const userInfoV2 = await db.getUserInfoV2(username);
+
+      if (userInfoV2) {
+        // 使用新版本用户信息
+        if (userInfoV2.role === 'admin' && !userInfoV2.banned) {
+          result.Role = 'admin';
+        } else {
+          return NextResponse.json(
+            { error: '你是管理员吗你就访问？' },
+            { status: 401 }
+          );
+        }
       } else {
-        return NextResponse.json(
-          { error: '你是管理员吗你就访问？' },
-          { status: 401 }
-        );
+        // 回退到配置中查找
+        const user = config.UserConfig.Users.find((u) => u.username === username);
+        if (user && user.role === 'admin' && !user.banned) {
+          result.Role = 'admin';
+        } else {
+          return NextResponse.json(
+            { error: '你是管理员吗你就访问？' },
+            { status: 401 }
+          );
+        }
       }
     }
 

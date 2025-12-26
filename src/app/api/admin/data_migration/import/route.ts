@@ -94,13 +94,80 @@ export async function POST(req: NextRequest) {
       // 不影响主流程，继续执行
     }
 
+    // 导入V2用户信息
+    if (importData.data.usersV2 && Array.isArray(importData.data.usersV2)) {
+      for (const userV2 of importData.data.usersV2) {
+        try {
+          // 跳过环境变量中的站长（站长使用环境变量认证）
+          if (userV2.username === process.env.USERNAME) {
+            console.log(`跳过站长 ${userV2.username} 的导入`);
+            continue;
+          }
+
+          // 获取用户的加密密码
+          const userData = importData.data.userData[userV2.username];
+          const passwordV2 = userData?.passwordV2;
+
+          if (passwordV2) {
+            // 将站长角色转换为普通角色
+            const importedRole = userV2.role === 'owner' ? 'user' : userV2.role;
+            if (userV2.role === 'owner') {
+              console.log(`用户 ${userV2.username} 的角色从 owner 转换为 user`);
+            }
+
+            // 直接使用加密后的密码创建用户
+            const storage = (db as any).storage;
+            if (storage && typeof storage.client?.hset === 'function') {
+              const userInfoKey = `user:${userV2.username}:info`;
+              const createdAt = userV2.created_at || Date.now();
+
+              const userInfo: any = {
+                role: importedRole,
+                banned: userV2.banned,
+                password: passwordV2,
+                created_at: createdAt.toString(),
+              };
+
+              if (userV2.tags && userV2.tags.length > 0) {
+                userInfo.tags = JSON.stringify(userV2.tags);
+              }
+
+              if (userV2.oidcSub) {
+                userInfo.oidcSub = userV2.oidcSub;
+                // 创建OIDC映射
+                const oidcSubKey = `oidc:sub:${userV2.oidcSub}`;
+                await storage.client.set(oidcSubKey, userV2.username);
+              }
+
+              if (userV2.enabledApis && userV2.enabledApis.length > 0) {
+                userInfo.enabledApis = JSON.stringify(userV2.enabledApis);
+              }
+
+              await storage.client.hset(userInfoKey, userInfo);
+
+              // 添加到用户列表（Sorted Set）
+              const userListKey = 'user:list';
+              await storage.client.zadd(userListKey, {
+                score: createdAt,
+                member: userV2.username,
+              });
+
+              console.log(`V2用户 ${userV2.username} 导入成功`);
+            }
+          }
+        } catch (error) {
+          console.error(`导入V2用户 ${userV2.username} 失败:`, error);
+        }
+      }
+    }
+
     // 导入用户数据
     const userData = importData.data.userData;
     for (const username in userData) {
       const user = userData[username];
 
-      // 重新注册用户（包含密码）
-      if (user.password) {
+      // 重新注册用户（包含密码）- 仅用于旧版用户
+      if (user.password && !importData.data.usersV2?.find((u: any) => u.username === username)) {
         await db.registerUser(username, user.password);
       }
 
@@ -139,6 +206,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       message: '数据导入成功',
       importedUsers: Object.keys(userData).length,
+      importedUsersV2: importData.data.usersV2?.length || 0,
       timestamp: importData.timestamp,
       serverVersion: typeof importData.serverVersion === 'string' ? importData.serverVersion : '未知版本'
     });

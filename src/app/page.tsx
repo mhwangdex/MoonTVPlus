@@ -57,55 +57,6 @@ function HomeClient() {
     }
   }, [announcement]);
 
-  // 首次进入时检查收藏更新（带前端冷却检查）
-  useEffect(() => {
-    const checkFavoriteUpdates = async () => {
-      try {
-        // 检查冷却时间（前端 localStorage）
-        const COOLDOWN_TIME = 30 * 60 * 1000; // 30分钟
-        const lastCheckTime = localStorage.getItem('lastFavoriteCheckTime');
-        const now = Date.now();
-
-        if (lastCheckTime) {
-          const timeSinceLastCheck = now - parseInt(lastCheckTime, 10);
-          if (timeSinceLastCheck < COOLDOWN_TIME) {
-            const remainingMinutes = Math.ceil((COOLDOWN_TIME - timeSinceLastCheck) / 1000 / 60);
-            console.log(`收藏更新检查冷却中，还需等待 ${remainingMinutes} 分钟`);
-            return;
-          }
-        }
-
-        console.log('开始检查收藏更新...');
-        const response = await fetch('/api/favorites/check-updates', {
-          method: 'POST',
-        });
-
-        if (response.ok) {
-          // 更新本地检查时间
-          localStorage.setItem('lastFavoriteCheckTime', now.toString());
-
-          const data = await response.json();
-          if (data.updates && data.updates.length > 0) {
-            console.log(`发现 ${data.updates.length} 个收藏更新`);
-            // 触发通知更新事件
-            window.dispatchEvent(new Event('notificationsUpdated'));
-          } else {
-            console.log('没有收藏更新');
-          }
-        }
-      } catch (error) {
-        console.error('检查收藏更新失败:', error);
-      }
-    };
-
-    // 延迟3秒后检查，避免影响首页加载
-    const timer = setTimeout(() => {
-      checkFavoriteUpdates();
-    }, 3000);
-
-    return () => clearTimeout(timer);
-  }, []);
-
   // 收藏夹数据
   type FavoriteItem = {
     id: string;

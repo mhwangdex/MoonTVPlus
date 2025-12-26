@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { getConfig } from '@/lib/config';
 import { db } from '@/lib/db';
+import { lockManager } from '@/lib/lock';
 
 export const runtime = 'nodejs';
 
@@ -93,69 +94,78 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 检查用户是否已存在
-    const existingUser = config.UserConfig.Users.find((u) => u.username === username);
-    if (existingUser) {
+    // 获取用户名锁，防止并发注册
+    let releaseLock: (() => void) | null = null;
+    try {
+      releaseLock = await lockManager.acquire(`register:${username}`);
+    } catch (error) {
       return NextResponse.json(
-        { error: '用户名已存在' },
-        { status: 409 }
+        { error: '服务器繁忙，请稍后重试' },
+        { status: 503 }
       );
     }
 
-    // 如果开启了Turnstile验证
-    if (siteConfig.RegistrationRequireTurnstile) {
-      if (!turnstileToken) {
-        return NextResponse.json(
-          { error: '请完成人机验证' },
-          { status: 400 }
-        );
-      }
-
-      if (!siteConfig.TurnstileSecretKey) {
-        console.error('Turnstile Secret Key未配置');
-        return NextResponse.json(
-          { error: '服务器配置错误' },
-          { status: 500 }
-        );
-      }
-
-      // 验证Turnstile Token
-      const isValid = await verifyTurnstileToken(turnstileToken, siteConfig.TurnstileSecretKey);
-      if (!isValid) {
-        return NextResponse.json(
-          { error: '人机验证失败，请重试' },
-          { status: 400 }
-        );
-      }
-    }
-
-    // 创建用户
     try {
-      // 1. 在数据库中创建用户密码
-      await db.registerUser(username, password);
-
-      // 2. 将用户添加到管理员配置的用户列表中
-      const newUser: any = {
-        username: username,
-        role: 'user',
-        banned: false,
-      };
-
-      // 3. 如果配置了默认用户组,分配给新用户
-      if (siteConfig.DefaultUserTags && siteConfig.DefaultUserTags.length > 0) {
-        newUser.tags = siteConfig.DefaultUserTags;
+      // 检查用户是否已存在（只检查V2存储）
+      const userExists = await db.checkUserExistV2(username);
+      if (userExists) {
+        return NextResponse.json(
+          { error: '用户名已存在' },
+          { status: 409 }
+        );
       }
 
-      config.UserConfig.Users.push(newUser);
+      // 如果开启了Turnstile验证
+      if (siteConfig.RegistrationRequireTurnstile) {
+        if (!turnstileToken) {
+          return NextResponse.json(
+            { error: '请完成人机验证' },
+            { status: 400 }
+          );
+        }
 
-      // 4. 保存更新后的配置
-      await db.saveAdminConfig(config);
+        if (!siteConfig.TurnstileSecretKey) {
+          console.error('Turnstile Secret Key未配置');
+          return NextResponse.json(
+            { error: '服务器配置错误' },
+            { status: 500 }
+          );
+        }
 
-      // 注册成功
-      return NextResponse.json({ ok: true, message: '注册成功' });
-    } catch (err) {
-      console.error('创建用户失败', err);
-      return NextResponse.json({ error: '注册失败，请稍后重试' }, { status: 500 });
+        // 验证Turnstile Token
+        const isValid = await verifyTurnstileToken(turnstileToken, siteConfig.TurnstileSecretKey);
+        if (!isValid) {
+          return NextResponse.json(
+            { error: '人机验证失败，请重试' },
+            { status: 400 }
+          );
+        }
+      }
+
+      // 创建用户
+      try {
+        // 使用新版本创建用户（带SHA256加密）
+        const defaultTags = siteConfig.DefaultUserTags && siteConfig.DefaultUserTags.length > 0
+          ? siteConfig.DefaultUserTags
+          : undefined;
+
+        await db.createUserV2(username, password, 'user', defaultTags);
+
+        // 注册成功
+        return NextResponse.json({ ok: true, message: '注册成功' });
+      } catch (err: any) {
+        console.error('创建用户失败', err);
+        // 如果是用户已存在的错误，返回409
+        if (err.message === '用户已存在') {
+          return NextResponse.json({ error: '用户名已存在' }, { status: 409 });
+        }
+        return NextResponse.json({ error: '注册失败，请稍后重试' }, { status: 500 });
+      }
+    } finally {
+      // 释放锁
+      if (releaseLock) {
+        releaseLock();
+      }
     }
   } catch (error) {
     console.error('注册接口异常', error);

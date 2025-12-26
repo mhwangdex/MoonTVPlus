@@ -18,12 +18,17 @@ import PageLayout from '@/components/PageLayout';
 import SearchResultFilter, { SearchFilterCategory } from '@/components/SearchResultFilter';
 import SearchSuggestions from '@/components/SearchSuggestions';
 import VideoCard, { VideoCardHandle } from '@/components/VideoCard';
+import PansouSearch from '@/components/PansouSearch';
 
 function SearchPageClient() {
   // 搜索历史
   const [searchHistory, setSearchHistory] = useState<string[]>([]);
   // 返回顶部按钮显示状态
   const [showBackToTop, setShowBackToTop] = useState(false);
+  // 选项卡状态: 'video' 或 'pansou'
+  const [activeTab, setActiveTab] = useState<'video' | 'pansou'>('video');
+  // Pansou 搜索触发标志
+  const [triggerPansouSearch, setTriggerPansouSearch] = useState(false);
 
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -381,6 +386,14 @@ function SearchPageClient() {
     });
   }, [aggregatedResults, filterAgg, searchQuery]);
 
+  // 监听选项卡切换，自动执行搜索
+  useEffect(() => {
+    // 如果切换到网盘搜索选项卡，且有搜索关键词，且已显示结果，则触发搜索
+    if (activeTab === 'pansou' && searchQuery.trim() && showResults) {
+      setTriggerPansouSearch(prev => !prev);
+    }
+  }, [activeTab]);
+
   useEffect(() => {
     // 无搜索参数时聚焦搜索框
     !searchParams.get('q') && document.getElementById('searchInput')?.focus();
@@ -693,8 +706,15 @@ function SearchPageClient() {
     setShowResults(true);
     setShowSuggestions(false);
 
-    router.push(`/search?q=${encodeURIComponent(trimmed)}`);
-    // 其余由 searchParams 变化的 effect 处理
+    // 根据当前选项卡执行不同的搜索
+    if (activeTab === 'video') {
+      // 影视搜索
+      router.push(`/search?q=${encodeURIComponent(trimmed)}`);
+      // 其余由 searchParams 变化的 effect 处理
+    } else if (activeTab === 'pansou') {
+      // 网盘搜索 - 触发搜索
+      setTriggerPansouSearch(prev => !prev); // 切换状态来触发搜索
+    }
   };
 
   const handleSuggestionSelect = (suggestion: string) => {
@@ -778,14 +798,41 @@ function SearchPageClient() {
               />
             </div>
           </form>
+
+          {/* 选项卡 */}
+          <div className='flex justify-center gap-2 mt-6'>
+            <button
+              onClick={() => setActiveTab('video')}
+              className={`px-6 py-2 rounded-lg text-sm font-medium transition-colors ${
+                activeTab === 'video'
+                  ? 'bg-green-600 text-white dark:bg-green-600'
+                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700'
+              }`}
+            >
+              影视搜索
+            </button>
+            <button
+              onClick={() => setActiveTab('pansou')}
+              className={`px-6 py-2 rounded-lg text-sm font-medium transition-colors ${
+                activeTab === 'pansou'
+                  ? 'bg-green-600 text-white dark:bg-green-600'
+                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700'
+              }`}
+            >
+              网盘搜索
+            </button>
+          </div>
         </div>
 
         {/* 搜索结果或搜索历史 */}
         <div className='max-w-[95%] mx-auto mt-12 overflow-visible'>
           {showResults ? (
             <section className='mb-12'>
-              {/* 标题 */}
-              <div className='mb-4 flex items-center justify-between'>
+              {activeTab === 'video' ? (
+                <>
+                  {/* 影视搜索结果 */}
+                  {/* 标题 */}
+                  <div className='mb-4 flex items-center justify-between'>
                 <h2 className='text-xl font-bold text-gray-800 dark:text-gray-200'>
                   搜索结果
                   {isFromCache ? (
@@ -930,6 +977,21 @@ function SearchPageClient() {
                     ))}
                 </div>
               )}
+                </>
+              ) : (
+                <>
+                  {/* 网盘搜索结果 */}
+                  <div className='mb-4'>
+                    <h2 className='text-xl font-bold text-gray-800 dark:text-gray-200'>
+                      网盘搜索结果
+                    </h2>
+                  </div>
+                  <PansouSearch
+                    keyword={searchQuery}
+                    triggerSearch={triggerPansouSearch}
+                  />
+                </>
+              )}
             </section>
           ) : searchHistory.length > 0 ? (
             // 搜索历史
@@ -953,9 +1015,18 @@ function SearchPageClient() {
                     <button
                       onClick={() => {
                         setSearchQuery(item);
-                        router.push(
-                          `/search?q=${encodeURIComponent(item.trim())}`
-                        );
+                        setShowResults(true);
+
+                        // 根据当前选项卡执行不同的搜索
+                        if (activeTab === 'video') {
+                          // 影视搜索
+                          router.push(
+                            `/search?q=${encodeURIComponent(item.trim())}`
+                          );
+                        } else if (activeTab === 'pansou') {
+                          // 网盘搜索
+                          setTriggerPansouSearch(prev => !prev);
+                        }
                       }}
                       className='px-4 py-2 bg-gray-500/10 hover:bg-gray-300 rounded-full text-sm text-gray-700 transition-colors duration-200 dark:bg-gray-700/50 dark:hover:bg-gray-600 dark:text-gray-300'
                     >

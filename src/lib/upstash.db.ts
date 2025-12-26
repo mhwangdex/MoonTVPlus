@@ -4,6 +4,7 @@ import { Redis } from '@upstash/redis';
 
 import { AdminConfig } from './admin.types';
 import { Favorite, IStorage, PlayRecord, SkipConfig } from './types';
+import { userInfoCache } from './user-cache';
 
 // 搜索历史最大条数
 const SEARCH_HISTORY_LIMIT = 20;
@@ -220,6 +221,424 @@ export class UpstashRedisStorage implements IStorage {
     }
   }
 
+  // ---------- 新版用户存储（使用Hash和Sorted Set） ----------
+  private userInfoKey(userName: string) {
+    return `user:${userName}:info`;
+  }
+
+  private userListKey() {
+    return 'user:list';
+  }
+
+  private oidcSubKey(oidcSub: string) {
+    return `oidc:sub:${oidcSub}`;
+  }
+
+  // SHA256加密密码
+  private async hashPassword(password: string): Promise<string> {
+    const encoder = new TextEncoder();
+    const data = encoder.encode(password);
+    const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+  }
+
+  // 创建新用户（新版本）
+  async createUserV2(
+    userName: string,
+    password: string,
+    role: 'owner' | 'admin' | 'user' = 'user',
+    tags?: string[],
+    oidcSub?: string,
+    enabledApis?: string[]
+  ): Promise<void> {
+    // 先检查用户是否已存在（原子性检查）
+    const exists = await withRetry(() =>
+      this.client.exists(this.userInfoKey(userName))
+    );
+    if (exists === 1) {
+      throw new Error('用户已存在');
+    }
+
+    const hashedPassword = await this.hashPassword(password);
+    const createdAt = Date.now();
+
+    // 存储用户信息到Hash
+    const userInfo: Record<string, any> = {
+      role,
+      banned: false,  // 直接使用布尔值
+      password: hashedPassword,
+      created_at: createdAt.toString(),
+    };
+
+    if (tags && tags.length > 0) {
+      userInfo.tags = JSON.stringify(tags);
+    }
+
+    if (oidcSub) {
+      userInfo.oidcSub = oidcSub;
+      // 创建OIDC映射
+      await withRetry(() => this.client.set(this.oidcSubKey(oidcSub), userName));
+    }
+
+    if (enabledApis && enabledApis.length > 0) {
+      userInfo.enabledApis = JSON.stringify(enabledApis);
+    }
+
+    await withRetry(() => this.client.hset(this.userInfoKey(userName), userInfo));
+
+    // 添加到用户列表（Sorted Set，按注册时间排序）
+    await withRetry(() => this.client.zadd(this.userListKey(), {
+      score: createdAt,
+      member: userName,
+    }));
+
+    // 如果创建的是站长用户，清除站长存在状态缓存
+    if (userName === process.env.USERNAME) {
+      const { ownerExistenceCache } = await import('./user-cache');
+      ownerExistenceCache.delete(userName);
+    }
+  }
+
+  // 验证用户密码（新版本）
+  async verifyUserV2(userName: string, password: string): Promise<boolean> {
+    const userInfo = await withRetry(() =>
+      this.client.hgetall(this.userInfoKey(userName))
+    );
+
+    if (!userInfo || !userInfo.password) {
+      return false;
+    }
+
+    const hashedPassword = await this.hashPassword(password);
+    return userInfo.password === hashedPassword;
+  }
+
+  // 获取用户信息（新版本）
+  async getUserInfoV2(userName: string): Promise<{
+    role: 'owner' | 'admin' | 'user';
+    banned: boolean;
+    tags?: string[];
+    oidcSub?: string;
+    enabledApis?: string[];
+    created_at: number;
+  } | null> {
+    // 先从缓存获取
+    const cached = userInfoCache?.get(userName);
+    if (cached) {
+      return cached;
+    }
+
+    const userInfo = await withRetry(() =>
+      this.client.hgetall(this.userInfoKey(userName))
+    );
+
+    if (!userInfo || Object.keys(userInfo).length === 0) {
+      return null;
+    }
+
+    // 处理 banned 字段：可能是字符串 'true'/'false' 或布尔值 true/false
+    let banned = false;
+    if (typeof userInfo.banned === 'boolean') {
+      banned = userInfo.banned;
+    } else if (typeof userInfo.banned === 'string') {
+      banned = userInfo.banned === 'true';
+    }
+
+    // 安全解析 tags 字段
+    let tags: string[] | undefined = undefined;
+    if (userInfo.tags) {
+      if (Array.isArray(userInfo.tags)) {
+        tags = userInfo.tags;
+      } else if (typeof userInfo.tags === 'string') {
+        try {
+          tags = JSON.parse(userInfo.tags);
+        } catch {
+          // 如果解析失败，可能是单个字符串，转换为数组
+          tags = [userInfo.tags];
+        }
+      }
+    }
+
+    // 安全解析 enabledApis 字段
+    let enabledApis: string[] | undefined = undefined;
+    if (userInfo.enabledApis) {
+      if (Array.isArray(userInfo.enabledApis)) {
+        enabledApis = userInfo.enabledApis;
+      } else if (typeof userInfo.enabledApis === 'string') {
+        try {
+          enabledApis = JSON.parse(userInfo.enabledApis);
+        } catch {
+          // 如果解析失败，可能是单个字符串，转换为数组
+          enabledApis = [userInfo.enabledApis];
+        }
+      }
+    }
+
+    const result = {
+      role: (userInfo.role as 'owner' | 'admin' | 'user') || 'user',
+      banned,
+      tags,
+      oidcSub: userInfo.oidcSub as string | undefined,
+      enabledApis,
+      created_at: parseInt((userInfo.created_at as string) || '0', 10),
+    };
+
+    // 存入缓存
+    userInfoCache?.set(userName, result);
+
+    return result;
+  }
+
+  // 更新用户信息（新版本）
+  async updateUserInfoV2(
+    userName: string,
+    updates: {
+      role?: 'owner' | 'admin' | 'user';
+      banned?: boolean;
+      tags?: string[];
+      oidcSub?: string;
+      enabledApis?: string[];
+    }
+  ): Promise<void> {
+    const userInfo: Record<string, any> = {};
+
+    if (updates.role !== undefined) {
+      userInfo.role = updates.role;
+    }
+
+    if (updates.banned !== undefined) {
+      // 直接存储布尔值，让 Upstash 自动处理序列化
+      userInfo.banned = updates.banned;
+    }
+
+    if (updates.tags !== undefined) {
+      if (updates.tags.length > 0) {
+        userInfo.tags = JSON.stringify(updates.tags);
+      } else {
+        // 删除tags字段
+        await withRetry(() => this.client.hdel(this.userInfoKey(userName), 'tags'));
+      }
+    }
+
+    if (updates.enabledApis !== undefined) {
+      if (updates.enabledApis.length > 0) {
+        userInfo.enabledApis = JSON.stringify(updates.enabledApis);
+      } else {
+        // 删除enabledApis字段
+        await withRetry(() => this.client.hdel(this.userInfoKey(userName), 'enabledApis'));
+      }
+    }
+
+    if (updates.oidcSub !== undefined) {
+      const oldInfo = await this.getUserInfoV2(userName);
+      if (oldInfo?.oidcSub && oldInfo.oidcSub !== updates.oidcSub) {
+        // 删除旧的OIDC映射
+        await withRetry(() => this.client.del(this.oidcSubKey(oldInfo.oidcSub!)));
+      }
+      userInfo.oidcSub = updates.oidcSub;
+      // 创建新的OIDC映射
+      await withRetry(() => this.client.set(this.oidcSubKey(updates.oidcSub!), userName));
+    }
+
+    if (Object.keys(userInfo).length > 0) {
+      await withRetry(() => this.client.hset(this.userInfoKey(userName), userInfo));
+    }
+
+    // 清除缓存
+    userInfoCache?.delete(userName);
+  }
+
+  // 修改用户密码（新版本）
+  async changePasswordV2(userName: string, newPassword: string): Promise<void> {
+    const hashedPassword = await this.hashPassword(newPassword);
+    await withRetry(() =>
+      this.client.hset(this.userInfoKey(userName), { password: hashedPassword })
+    );
+
+    // 清除缓存
+    userInfoCache?.delete(userName);
+  }
+
+  // 检查用户是否存在（新版本）
+  async checkUserExistV2(userName: string): Promise<boolean> {
+    const exists = await withRetry(() =>
+      this.client.exists(this.userInfoKey(userName))
+    );
+    return exists === 1;
+  }
+
+  // 通过OIDC Sub查找用户名
+  async getUserByOidcSub(oidcSub: string): Promise<string | null> {
+    const userName = await withRetry(() =>
+      this.client.get(this.oidcSubKey(oidcSub))
+    );
+    return userName ? ensureString(userName) : null;
+  }
+
+  // 获取使用特定用户组的用户列表
+  async getUsersByTag(tagName: string): Promise<string[]> {
+    const affectedUsers: string[] = [];
+
+    // 使用 SCAN 遍历所有用户信息的 key
+    let cursor: number | string = 0;
+    do {
+      const result = await withRetry(() =>
+        this.client.scan(cursor as number, { match: 'user:*:info', count: 100 })
+      );
+
+      cursor = result[0];
+      const keys = result[1];
+
+      // 检查每个用户的 tags
+      for (const key of keys) {
+        const userInfo = await withRetry(() => this.client.hgetall(key));
+        if (userInfo && userInfo.tags) {
+          const tags = JSON.parse(userInfo.tags as string);
+          if (tags.includes(tagName)) {
+            // 从 key 中提取用户名: user:username:info -> username
+            const username = key.replace('user:', '').replace(':info', '');
+            affectedUsers.push(username);
+          }
+        }
+      }
+    } while (typeof cursor === 'number' ? cursor !== 0 : cursor !== '0');
+
+    return affectedUsers;
+  }
+
+  // 获取用户列表（分页，新版本）
+  async getUserListV2(
+    offset: number = 0,
+    limit: number = 20,
+    ownerUsername?: string
+  ): Promise<{
+    users: Array<{
+      username: string;
+      role: 'owner' | 'admin' | 'user';
+      banned: boolean;
+      tags?: string[];
+      oidcSub?: string;
+      enabledApis?: string[];
+      created_at: number;
+    }>;
+    total: number;
+  }> {
+    // 获取总数
+    let total = await withRetry(() => this.client.zcard(this.userListKey()));
+
+    // 检查站长是否在数据库中（使用缓存）
+    let ownerInfo = null;
+    let ownerInDatabase = false;
+    if (ownerUsername) {
+      // 先检查缓存
+      const { ownerExistenceCache } = await import('./user-cache');
+      const cachedExists = ownerExistenceCache.get(ownerUsername);
+
+      if (cachedExists !== null) {
+        // 使用缓存的结果
+        ownerInDatabase = cachedExists;
+        if (ownerInDatabase) {
+          // 如果站长在数据库中，获取详细信息
+          ownerInfo = await this.getUserInfoV2(ownerUsername);
+        }
+      } else {
+        // 缓存未命中，查询数据库
+        ownerInfo = await this.getUserInfoV2(ownerUsername);
+        ownerInDatabase = !!ownerInfo;
+        // 更���缓存
+        ownerExistenceCache.set(ownerUsername, ownerInDatabase);
+      }
+
+      // 如果站长不在数据库中，总数+1（无论在哪一页都要加）
+      if (!ownerInDatabase) {
+        total += 1;
+      }
+    }
+
+    // 如果站长不在数据库中且在第一页，需要调整获取的用户数量和偏移量
+    let actualOffset = offset;
+    let actualLimit = limit;
+
+    if (ownerUsername && !ownerInDatabase) {
+      if (offset === 0) {
+        // 第一页：只获取 limit-1 个用户，为站长留出位置
+        actualLimit = limit - 1;
+      } else {
+        // 其他页：偏移量需要减1，因为站长占据了第一页的一个位置
+        actualOffset = offset - 1;
+      }
+    }
+
+    // 获取用户列表（按注册时间升序）
+    const usernames = await withRetry(() =>
+      this.client.zrange(this.userListKey(), actualOffset, actualOffset + actualLimit - 1)
+    );
+
+    const users = [];
+
+    // 如果有站长且在第一页，确保站长始终在第一位
+    if (ownerUsername && offset === 0) {
+      // 即使站长不在数据库中，也要添加站长（站长使用环境变量认证）
+      users.push({
+        username: ownerUsername,
+        role: 'owner' as const,
+        banned: ownerInfo?.banned || false,
+        tags: ownerInfo?.tags,
+        oidcSub: ownerInfo?.oidcSub,
+        enabledApis: ownerInfo?.enabledApis,
+        created_at: ownerInfo?.created_at || 0,
+      });
+    }
+
+    // 获取其他用户信息
+    for (const username of usernames) {
+      const usernameStr = ensureString(username);
+      // 跳过站长（已经添加）
+      if (ownerUsername && usernameStr === ownerUsername) {
+        continue;
+      }
+
+      const userInfo = await this.getUserInfoV2(usernameStr);
+      if (userInfo) {
+        users.push({
+          username: usernameStr,
+          role: userInfo.role,
+          banned: userInfo.banned,
+          tags: userInfo.tags,
+          oidcSub: userInfo.oidcSub,
+          enabledApis: userInfo.enabledApis,
+          created_at: userInfo.created_at,
+        });
+      }
+    }
+
+    return { users, total };
+  }
+
+  // 删除用户（新版本）
+  async deleteUserV2(userName: string): Promise<void> {
+    // 获取用户信息
+    const userInfo = await this.getUserInfoV2(userName);
+
+    // 删除OIDC映射
+    if (userInfo?.oidcSub) {
+      await withRetry(() => this.client.del(this.oidcSubKey(userInfo.oidcSub!)));
+    }
+
+    // 删除用户信息Hash
+    await withRetry(() => this.client.del(this.userInfoKey(userName)));
+
+    // 从用户列表中移除
+    await withRetry(() => this.client.zrem(this.userListKey(), userName));
+
+    // 删除用户的其他数据（播放记录、收藏等）
+    await this.deleteUser(userName);
+
+    // 清除缓存
+    userInfoCache?.delete(userName);
+  }
+
   // ---------- 搜索历史 ----------
   private shKey(user: string) {
     return `u:${user}:sh`; // u:username:sh
@@ -254,13 +673,20 @@ export class UpstashRedisStorage implements IStorage {
 
   // ---------- 获取全部用户 ----------
   async getAllUsers(): Promise<string[]> {
-    const keys = await withRetry(() => this.client.keys('u:*:pwd'));
-    return keys
-      .map((k) => {
-        const match = k.match(/^u:(.+?):pwd$/);
-        return match ? ensureString(match[1]) : undefined;
-      })
-      .filter((u): u is string => typeof u === 'string');
+    // 从新版用户列表获取
+    const userListKey = this.userListKey();
+    const users = await withRetry(() =>
+      this.client.zrange(userListKey, 0, -1)
+    );
+    const userList = users.map(u => ensureString(u));
+
+    // 确保站长在列表中（站长可能不在数据库中，使用环境变量认证）
+    const ownerUsername = process.env.USERNAME;
+    if (ownerUsername && !userList.includes(ownerUsername)) {
+      userList.unshift(ownerUsername);
+    }
+
+    return userList;
   }
 
   // ---------- 管理员配置 ----------

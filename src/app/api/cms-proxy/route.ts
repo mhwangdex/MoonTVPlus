@@ -1,6 +1,16 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
+/* eslint-disable @typescript-eslint/no-explicit-any, no-console */
 
 import { NextRequest, NextResponse } from 'next/server';
+
+import { getConfig } from '@/lib/config';
+import { db } from '@/lib/db';
+import { OpenListClient } from '@/lib/openlist.client';
+import {
+  getCachedMetaInfo,
+  MetaInfo,
+  setCachedMetaInfo,
+} from '@/lib/openlist-cache';
+import { getTMDBImageUrl } from '@/lib/tmdb.search';
 
 export const runtime = 'nodejs';
 
@@ -19,6 +29,11 @@ export async function GET(request: NextRequest) {
         { error: '缺少必要参数: api' },
         { status: 400 }
       );
+    }
+
+    // 特殊处理 openlist
+    if (apiUrl === 'openlist') {
+      return handleOpenListProxy(request);
     }
 
     // 构建完整的 API 请求 URL，包含所有查询参数
@@ -236,4 +251,171 @@ function processUrl(url: string, playFrom: string, proxyOrigin: string, tokenPar
 
   // 非 m3u8 链接不处理
   return url;
+}
+
+/**
+ * 处理 OpenList 代理请求
+ */
+async function handleOpenListProxy(request: NextRequest) {
+  const { searchParams } = new URL(request.url);
+  const wd = searchParams.get('wd'); // 搜索关键词
+  const ids = searchParams.get('ids'); // 详情ID
+
+  const config = await getConfig();
+  const openListConfig = config.OpenListConfig;
+
+  if (!openListConfig || !openListConfig.URL || !openListConfig.Username || !openListConfig.Password) {
+    return NextResponse.json(
+      { code: 0, msg: 'OpenList 未配置', list: [] },
+      { status: 200 }
+    );
+  }
+
+  const rootPath = openListConfig.RootPath || '/';
+  const client = new OpenListClient(
+    openListConfig.URL,
+    openListConfig.Username,
+    openListConfig.Password
+  );
+
+  // 读取 metainfo (从数据库或缓存)
+  let metaInfo: MetaInfo | null = getCachedMetaInfo(rootPath);
+
+  if (!metaInfo) {
+    try {
+      const metainfoJson = await db.getGlobalValue('video.metainfo');
+      if (metainfoJson) {
+        metaInfo = JSON.parse(metainfoJson) as MetaInfo;
+        setCachedMetaInfo(rootPath, metaInfo);
+      }
+    } catch (error) {
+      return NextResponse.json(
+        { code: 0, msg: 'metainfo 不存在', list: [] },
+        { status: 200 }
+      );
+    }
+  }
+
+  if (!metaInfo) {
+    return NextResponse.json(
+      { code: 0, msg: '无数据', list: [] },
+      { status: 200 }
+    );
+  }
+
+  // 搜索模式
+  if (wd) {
+    const results = Object.entries(metaInfo.folders)
+      .filter(
+        ([folderName, info]) =>
+          folderName.toLowerCase().includes(wd.toLowerCase()) ||
+          info.title.toLowerCase().includes(wd.toLowerCase())
+      )
+      .map(([folderName, info]) => ({
+        vod_id: folderName,
+        vod_name: info.title,
+        vod_pic: getTMDBImageUrl(info.poster_path),
+        vod_remarks: info.media_type === 'movie' ? '电影' : '剧集',
+        vod_year: info.release_date.split('-')[0] || '',
+        type_name: info.media_type === 'movie' ? '电影' : '电视剧',
+      }));
+
+    return NextResponse.json({
+      code: 1,
+      msg: '数据列表',
+      page: 1,
+      pagecount: 1,
+      limit: results.length,
+      total: results.length,
+      list: results,
+    });
+  }
+
+  // 详情模式
+  if (ids) {
+    const folderName = ids;
+    const info = metaInfo.folders[folderName];
+
+    if (!info) {
+      return NextResponse.json(
+        { code: 0, msg: '视频不存在', list: [] },
+        { status: 200 }
+      );
+    }
+
+    // 获取视频详情
+    try {
+      const detailResponse = await fetch(
+        `${request.headers.get('x-forwarded-proto') || 'http'}://${request.headers.get('host')}/api/openlist/detail?folder=${encodeURIComponent(folderName)}`
+      );
+
+      if (!detailResponse.ok) {
+        throw new Error('获取视频详情失败');
+      }
+
+      const detailData = await detailResponse.json();
+
+      if (!detailData.success) {
+        throw new Error('获取视频详情失败');
+      }
+
+      // 构建播放列表
+      const playUrls = detailData.episodes
+        .map((ep: any) => {
+          const title = ep.title || `第${ep.episode}集`;
+          return `${title}$${ep.playUrl}`;
+        })
+        .join('#');
+
+      return NextResponse.json({
+        code: 1,
+        msg: '数据列表',
+        page: 1,
+        pagecount: 1,
+        limit: 1,
+        total: 1,
+        list: [
+          {
+            vod_id: folderName,
+            vod_name: info.title,
+            vod_pic: getTMDBImageUrl(info.poster_path),
+            vod_remarks: info.media_type === 'movie' ? '电影' : '剧集',
+            vod_year: info.release_date.split('-')[0] || '',
+            vod_content: info.overview,
+            vod_play_from: 'OpenList',
+            vod_play_url: playUrls,
+            type_name: info.media_type === 'movie' ? '电影' : '电视剧',
+          },
+        ],
+      });
+    } catch (error) {
+      console.error('获取 OpenList 视频详情失败:', error);
+      return NextResponse.json(
+        { code: 0, msg: '获取详情失败', list: [] },
+        { status: 200 }
+      );
+    }
+  }
+
+  // 默认返回所有视频
+  const results = Object.entries(metaInfo.folders).map(
+    ([folderName, info]) => ({
+      vod_id: folderName,
+      vod_name: info.title,
+      vod_pic: getTMDBImageUrl(info.poster_path),
+      vod_remarks: info.media_type === 'movie' ? '电影' : '剧集',
+      vod_year: info.release_date.split('-')[0] || '',
+      type_name: info.media_type === 'movie' ? '电影' : '电视剧',
+    })
+  );
+
+  return NextResponse.json({
+    code: 1,
+    msg: '数据列表',
+    page: 1,
+    pagecount: 1,
+    limit: results.length,
+    total: results.length,
+    list: results,
+  });
 }

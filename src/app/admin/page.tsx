@@ -46,6 +46,7 @@ import { createPortal } from 'react-dom';
 import { AdminConfig, AdminConfigResult } from '@/lib/admin.types';
 import { getAuthInfoFromBrowserCookie } from '@/lib/auth';
 
+import CorrectDialog from '@/components/CorrectDialog';
 import DataMigration from '@/components/DataMigration';
 import PageLayout from '@/components/PageLayout';
 
@@ -119,6 +120,7 @@ interface AlertModalProps {
   message?: string;
   timer?: number;
   showConfirm?: boolean;
+  onConfirm?: () => void;
 }
 
 const AlertModal = ({
@@ -129,6 +131,7 @@ const AlertModal = ({
   message,
   timer,
   showConfirm = false,
+  onConfirm,
 }: AlertModalProps) => {
   const [isVisible, setIsVisible] = useState(false);
 
@@ -195,14 +198,38 @@ const AlertModal = ({
             <p className='text-gray-600 dark:text-gray-400 mb-4'>{message}</p>
           )}
 
-          {showConfirm && (
-            <button
-              onClick={onClose}
-              className={`px-4 py-2 text-sm font-medium ${buttonStyles.primary}`}
-            >
-              确定
-            </button>
-          )}
+          {showConfirm ? (
+            onConfirm ? (
+              // 确认操作：显示取消和确定按钮
+              <div className='flex gap-3 justify-center'>
+                <button
+                  onClick={() => {
+                    onClose();
+                  }}
+                  className={buttonStyles.secondary}
+                >
+                  取消
+                </button>
+                <button
+                  onClick={() => {
+                    if (onConfirm) onConfirm();
+                    // 不要在这里调用onClose，让onConfirm自己决定何时关闭
+                  }}
+                  className={buttonStyles.danger}
+                >
+                  确定
+                </button>
+              </div>
+            ) : (
+              // 普通提示：只显示确定按钮
+              <button
+                onClick={onClose}
+                className={buttonStyles.primary}
+              >
+                确定
+              </button>
+            )
+          ) : null}
         </div>
       </div>
     </div>,
@@ -219,6 +246,7 @@ const useAlertModal = () => {
     message?: string;
     timer?: number;
     showConfirm?: boolean;
+    onConfirm?: () => void;
   }>({
     isOpen: false,
     type: 'success',
@@ -298,6 +326,10 @@ interface SiteConfig {
   DanmakuApiBase: string;
   DanmakuApiToken: string;
   TMDBApiKey?: string;
+  TMDBProxy?: string;
+  PansouApiUrl?: string;
+  PansouUsername?: string;
+  PansouPassword?: string;
   EnableComments: boolean;
   EnableRegistration?: boolean;
   RegistrationRequireTurnstile?: boolean;
@@ -390,9 +422,23 @@ interface UserConfigProps {
   config: AdminConfig | null;
   role: 'owner' | 'admin' | null;
   refreshConfig: () => Promise<void>;
+  usersV2: Array<{
+    username: string;
+    role: 'owner' | 'admin' | 'user';
+    banned: boolean;
+    tags?: string[];
+    oidcSub?: string;
+    enabledApis?: string[];
+    created_at: number;
+  }> | null;
+  userPage: number;
+  userTotalPages: number;
+  userTotal: number;
+  fetchUsersV2: (page: number) => Promise<void>;
+  userListLoading: boolean;
 }
 
-const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
+const UserConfig = ({ config, role, refreshConfig, usersV2, userPage, userTotalPages, userTotal, fetchUsersV2, userListLoading }: UserConfigProps) => {
   const { alertModal, showAlert, hideAlert } = useAlertModal();
   const { isLoading, withLoading } = useLoadingState();
   const [showAddUserForm, setShowAddUserForm] = useState(false);
@@ -450,17 +496,31 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
   // 当前登录用户名
   const currentUsername = getAuthInfoFromBrowserCookie()?.username || null;
 
+  // 判断是否有旧版用户数据需要迁移
+  const hasOldUserData = config?.UserConfig?.Users?.filter((u: any) => u.role !== 'owner').length ?? 0 > 0;
+
+  // 使用新版本用户列表（如果可用且没有旧数据），否则使用配置中的用户列表
+  const displayUsers: Array<{
+    username: string;
+    role: 'owner' | 'admin' | 'user';
+    banned?: boolean;
+    enabledApis?: string[];
+    tags?: string[];
+    created_at?: number;
+    oidcSub?: string;
+  }> = !hasOldUserData && usersV2 ? usersV2 : (config?.UserConfig?.Users || []);
+
   // 使用 useMemo 计算全选状态，避免每次渲染都重新计算
   const selectAllUsers = useMemo(() => {
     const selectableUserCount =
-      config?.UserConfig?.Users?.filter(
+      displayUsers?.filter(
         (user) =>
           role === 'owner' ||
           (role === 'admin' &&
             (user.role === 'user' || user.username === currentUsername))
       ).length || 0;
     return selectedUsers.size === selectableUserCount && selectedUsers.size > 0;
-  }, [selectedUsers.size, config?.UserConfig?.Users, role, currentUsername]);
+  }, [selectedUsers.size, displayUsers, role, currentUsername]);
 
   // 获取用户组列表
   const userGroups = config?.UserConfig?.Tags || [];
@@ -846,7 +906,7 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
         throw new Error(data.error || `操作失败: ${res.status}`);
       }
 
-      // 成功后刷新配置（无需整页刷新）
+      // 成功后刷新配置和用户列表（refreshConfig 已经是 refreshConfigAndUsers）
       await refreshConfig();
     } catch (err) {
       showError(err instanceof Error ? err.message : '操作失败', showAlert);
@@ -884,12 +944,78 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
         </h4>
         <div className='p-4 bg-green-50 dark:bg-green-900/20 rounded-lg border border-green-200 dark:border-green-800'>
           <div className='text-2xl font-bold text-green-800 dark:text-green-300'>
-            {config.UserConfig.Users.length}
+            {!hasOldUserData && usersV2 ? userTotal : displayUsers.length}
           </div>
           <div className='text-sm text-green-600 dark:text-green-400'>
             总用户数
           </div>
         </div>
+
+        {/* 数据迁移提示 */}
+        {config.UserConfig.Users &&
+         config.UserConfig.Users.filter(u => u.role !== 'owner').length > 0 && (
+          <div className='mt-4 p-4 bg-yellow-50 dark:bg-yellow-900/20 rounded-lg border border-yellow-200 dark:border-yellow-800'>
+            <div className='flex items-start justify-between'>
+              <div className='flex-1'>
+                <h5 className='text-sm font-medium text-yellow-800 dark:text-yellow-300 mb-1'>
+                  检测到旧版用户数据
+                </h5>
+                <p className='text-xs text-yellow-600 dark:text-yellow-400'>
+                  建议迁移到新的用户存储结构，以获得更好的性能和安全性。迁移后用户密码将使用SHA256加密。
+                </p>
+              </div>
+              <button
+                onClick={() => {
+                  showAlert({
+                    type: 'warning',
+                    title: '确认迁移用户数据',
+                    message: '迁移过程中请勿关闭页面。迁移完成后，所有用户密码将使用SHA256加密存储。',
+                    showConfirm: true,
+                    onConfirm: async () => {
+                      hideAlert();
+                      await withLoading('migrateUsers', async () => {
+                        try {
+                          const response = await fetch('/api/admin/migrate-users', {
+                            method: 'POST',
+                            headers: {
+                              'Content-Type': 'application/json',
+                            },
+                          });
+
+                          if (!response.ok) {
+                            const errorData = await response.json();
+                            throw new Error(errorData.error || '迁移失败');
+                          }
+
+                          showAlert({
+                            type: 'success',
+                            title: '用户数据迁移成功',
+                            message: '所有用户已迁移到新的存储结构',
+                            timer: 2000,
+                          });
+                          await refreshConfig();
+                        } catch (error: any) {
+                          console.error('迁移用户数据失败:', error);
+                          showAlert({
+                            type: 'error',
+                            title: '迁移失败',
+                            message: error.message || '迁移用户数据时发生错误',
+                          });
+                        }
+                      });
+                    },
+                  });
+                }}
+                disabled={isLoading('migrateUsers')}
+                className={`ml-4 ${buttonStyles.warning} ${
+                  isLoading('migrateUsers') ? 'opacity-50 cursor-not-allowed' : ''
+                }`}
+              >
+                {isLoading('migrateUsers') ? '迁移中...' : '立即迁移'}
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* 用户组管理 */}
@@ -1163,10 +1289,31 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
         )}
 
         {/* 用户列表 */}
-        <div
-          className='border border-gray-200 dark:border-gray-700 rounded-lg max-h-[28rem] overflow-y-auto overflow-x-auto relative'
-          data-table='user-list'
-        >
+        <div className='relative'>
+          {/* 迁移遮罩层 */}
+          {config.UserConfig.Users &&
+           config.UserConfig.Users.filter(u => u.role !== 'owner').length > 0 && (
+            <div className='absolute inset-0 z-20 backdrop-blur-sm bg-white/30 dark:bg-gray-900/30 rounded-lg flex items-center justify-center'>
+              <div className='bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl border border-yellow-200 dark:border-yellow-800 max-w-md'>
+                <div className='flex items-center gap-3 mb-4'>
+                  <AlertTriangle className='w-6 h-6 text-yellow-600 dark:text-yellow-400' />
+                  <h3 className='text-lg font-semibold text-gray-900 dark:text-gray-100'>
+                    需要迁移数据
+                  </h3>
+                </div>
+                <p className='text-sm text-gray-600 dark:text-gray-400 mb-4'>
+                  检测到旧版用户数据，请先迁移到新的存储结构后再进行用户管理操作。
+                </p>
+                <p className='text-xs text-gray-500 dark:text-gray-500'>
+                  请在上方的"用户统计"区域点击"立即迁移"按钮完成数据迁移。
+                </p>
+              </div>
+            </div>
+          )}
+          <div
+            className='border border-gray-200 dark:border-gray-700 rounded-lg max-h-[28rem] overflow-y-auto overflow-x-auto relative'
+            data-table='user-list'
+          >
           <table className='min-w-full divide-y divide-gray-200 dark:divide-gray-700'>
             <thead className='bg-gray-50 dark:bg-gray-900 sticky top-0 z-10'>
               <tr>
@@ -1234,8 +1381,21 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
             </thead>
             {/* 按规则排序用户：自己 -> 站长(若非自己) -> 管理员 -> 其他 */}
             {(() => {
-              const sortedUsers = [...config.UserConfig.Users].sort((a, b) => {
-                type UserInfo = (typeof config.UserConfig.Users)[number];
+              // 如果正在加载，显示加载状态
+              if (userListLoading) {
+                return (
+                  <tbody>
+                    <tr>
+                      <td colSpan={7} className='px-6 py-8 text-center text-gray-500 dark:text-gray-400'>
+                        加载中...
+                      </td>
+                    </tr>
+                  </tbody>
+                );
+              }
+
+              const sortedUsers = [...displayUsers].sort((a, b) => {
+                type UserInfo = (typeof displayUsers)[number];
                 const priority = (u: UserInfo) => {
                   if (u.username === currentUsername) return 0;
                   if (u.role === 'owner') return 1;
@@ -1295,7 +1455,7 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
                         <td className='px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-gray-100'>
                           <div className='flex items-center gap-2'>
                             <span>{user.username}</span>
-                            {(user as any).oidcSub && (
+                            {user.oidcSub && (
                               <span className='px-2 py-0.5 text-xs rounded-full bg-blue-100 dark:bg-blue-900/20 text-blue-800 dark:text-blue-300'>
                                 OIDC
                               </span>
@@ -1474,6 +1634,62 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
               );
             })()}
           </table>
+        </div>
+
+        {/* 用户列表分页 */}
+        {!hasOldUserData && usersV2 && userTotalPages > 1 && (
+          <div className='mt-4 flex items-center justify-between px-4'>
+            <div className='text-sm text-gray-600 dark:text-gray-400'>
+              共 {userTotal} 个用户，第 {userPage} / {userTotalPages} 页
+            </div>
+            <div className='flex items-center space-x-2'>
+              <button
+                onClick={() => fetchUsersV2(1)}
+                disabled={userPage === 1}
+                className={`px-3 py-1 text-sm rounded ${
+                  userPage === 1
+                    ? 'bg-gray-100 dark:bg-gray-800 text-gray-400 dark:text-gray-600 cursor-not-allowed'
+                    : 'bg-blue-500 hover:bg-blue-600 text-white'
+                }`}
+              >
+                首页
+              </button>
+              <button
+                onClick={() => fetchUsersV2(userPage - 1)}
+                disabled={userPage === 1}
+                className={`px-3 py-1 text-sm rounded ${
+                  userPage === 1
+                    ? 'bg-gray-100 dark:bg-gray-800 text-gray-400 dark:text-gray-600 cursor-not-allowed'
+                    : 'bg-blue-500 hover:bg-blue-600 text-white'
+                }`}
+              >
+                上一页
+              </button>
+              <button
+                onClick={() => fetchUsersV2(userPage + 1)}
+                disabled={userPage === userTotalPages}
+                className={`px-3 py-1 text-sm rounded ${
+                  userPage === userTotalPages
+                    ? 'bg-gray-100 dark:bg-gray-800 text-gray-400 dark:text-gray-600 cursor-not-allowed'
+                    : 'bg-blue-500 hover:bg-blue-600 text-white'
+                }`}
+              >
+                下一页
+              </button>
+              <button
+                onClick={() => fetchUsersV2(userTotalPages)}
+                disabled={userPage === userTotalPages}
+                className={`px-3 py-1 text-sm rounded ${
+                  userPage === userTotalPages
+                    ? 'bg-gray-100 dark:bg-gray-800 text-gray-400 dark:text-gray-600 cursor-not-allowed'
+                    : 'bg-blue-500 hover:bg-blue-600 text-white'
+                }`}
+              >
+                末页
+              </button>
+            </div>
+          </div>
+        )}
         </div>
       </div>
 
@@ -2523,7 +2739,591 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
         message={alertModal.message}
         timer={alertModal.timer}
         showConfirm={alertModal.showConfirm}
+        onConfirm={alertModal.onConfirm}
       />
+    </div>
+  );
+};
+
+// 私人影库配置组件
+const OpenListConfigComponent = ({
+  config,
+  refreshConfig,
+}: {
+  config: AdminConfig | null;
+  refreshConfig: () => Promise<void>;
+}) => {
+  const { alertModal, showAlert, hideAlert } = useAlertModal();
+  const { isLoading, withLoading } = useLoadingState();
+  const [enabled, setEnabled] = useState(false);
+  const [url, setUrl] = useState('');
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [rootPath, setRootPath] = useState('/');
+  const [scanInterval, setScanInterval] = useState(0);
+  const [videos, setVideos] = useState<any[]>([]);
+  const [refreshing, setRefreshing] = useState(false);
+  const [scanProgress, setScanProgress] = useState<{
+    current: number;
+    total: number;
+    currentFolder?: string;
+  } | null>(null);
+  const [correctDialogOpen, setCorrectDialogOpen] = useState(false);
+  const [selectedVideo, setSelectedVideo] = useState<any | null>(null);
+
+  useEffect(() => {
+    if (config?.OpenListConfig) {
+      setEnabled(config.OpenListConfig.Enabled || false);
+      setUrl(config.OpenListConfig.URL || '');
+      setUsername(config.OpenListConfig.Username || '');
+      setPassword(config.OpenListConfig.Password || '');
+      setRootPath(config.OpenListConfig.RootPath || '/');
+      setScanInterval(config.OpenListConfig.ScanInterval || 0);
+    }
+  }, [config]);
+
+  useEffect(() => {
+    if (config?.OpenListConfig?.URL && config?.OpenListConfig?.Username && config?.OpenListConfig?.Password) {
+      fetchVideos();
+    }
+  }, [config]);
+
+  const fetchVideos = async (noCache = false) => {
+    try {
+      setRefreshing(true);
+      const url = `/api/openlist/list?page=1&pageSize=100&includeFailed=true${noCache ? '&noCache=true' : ''}`;
+      const response = await fetch(url);
+      if (response.ok) {
+        const data = await response.json();
+        setVideos(data.list || []);
+      }
+    } catch (error) {
+      console.error('获取视频列表失败:', error);
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+  const handleSave = async () => {
+    await withLoading('saveOpenList', async () => {
+      try {
+        const response = await fetch('/api/admin/openlist', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'save',
+            Enabled: enabled,
+            URL: url,
+            Username: username,
+            Password: password,
+            RootPath: rootPath,
+            ScanInterval: scanInterval,
+          }),
+        });
+
+        if (!response.ok) {
+          const data = await response.json();
+          throw new Error(data.error || '保存失败');
+        }
+
+        showSuccess('保存成功', showAlert);
+        await refreshConfig();
+      } catch (error) {
+        showError(error instanceof Error ? error.message : '保存失败', showAlert);
+        throw error;
+      }
+    });
+  };
+
+  const handleRefresh = async (clearMetaInfo = false) => {
+    setRefreshing(true);
+    setScanProgress(null);
+    try {
+      const response = await fetch('/api/openlist/refresh', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ clearMetaInfo }),
+      });
+
+      if (!response.ok) {
+        const data = await response.json();
+        throw new Error(data.error || '刷新失败');
+      }
+
+      const result = await response.json();
+      const taskId = result.taskId;
+
+      if (!taskId) {
+        throw new Error('未获取到任务ID');
+      }
+
+      // 轮询任务进度
+      const pollInterval = setInterval(async () => {
+        try {
+          const progressResponse = await fetch(
+            `/api/openlist/scan-progress?taskId=${taskId}`
+          );
+
+          if (!progressResponse.ok) {
+            clearInterval(pollInterval);
+            throw new Error('获取进度失败');
+          }
+
+          const progressData = await progressResponse.json();
+          const task = progressData.task;
+
+          if (task.status === 'running') {
+            setScanProgress(task.progress);
+          } else if (task.status === 'completed') {
+            clearInterval(pollInterval);
+            setScanProgress(null);
+            setRefreshing(false);
+            showSuccess(
+              `扫描完成！新增 ${task.result.new} 个，已存在 ${task.result.existing} 个，失败 ${task.result.errors} 个`,
+              showAlert
+            );
+            // 先强制从数据库读取视频列表（这会更新缓存）
+            await fetchVideos(true);
+            // 然后再刷新配置（这会触发 useEffect，但此时缓存已经是新的了）
+            await refreshConfig();
+          } else if (task.status === 'failed') {
+            clearInterval(pollInterval);
+            setScanProgress(null);
+            setRefreshing(false);
+            throw new Error(task.error || '扫描失败');
+          }
+        } catch (error) {
+          clearInterval(pollInterval);
+          setScanProgress(null);
+          setRefreshing(false);
+          showError(
+            error instanceof Error ? error.message : '获取进度失败',
+            showAlert
+          );
+        }
+      }, 1000);
+    } catch (error) {
+      setScanProgress(null);
+      setRefreshing(false);
+      showError(error instanceof Error ? error.message : '刷新失败', showAlert);
+    }
+  };
+
+  const handleRefreshVideo = async (folder: string) => {
+    try {
+      const response = await fetch('/api/openlist/refresh-video', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ folder }),
+      });
+
+      if (!response.ok) {
+        const data = await response.json();
+        throw new Error(data.error || '刷新失败');
+      }
+
+      showSuccess('刷新成功', showAlert);
+    } catch (error) {
+      showError(error instanceof Error ? error.message : '刷新失败', showAlert);
+    }
+  };
+
+  const handleCorrectSuccess = () => {
+    fetchVideos(true); // 强制从数据库重新读取，不使用缓存
+  };
+
+  const handleCheckConnectivity = async () => {
+    await withLoading('checkOpenList', async () => {
+      try {
+        const response = await fetch('/api/openlist/check', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            url,
+            username,
+            password,
+          }),
+        });
+
+        const data = await response.json();
+
+        if (response.ok && data.success) {
+          showSuccess('连接成功', showAlert);
+        } else {
+          throw new Error(data.error || '连接失败');
+        }
+      } catch (error) {
+        showError(error instanceof Error ? error.message : '连接失败', showAlert);
+        throw error;
+      }
+    });
+  };
+
+  const handleDeleteVideo = async (folder: string, title: string) => {
+    // 显示确认对话框，直接在 onConfirm 中执行删除操作
+    showAlert({
+      type: 'warning',
+      title: '确认删除',
+      message: `确定要删除视频记录"${title}"吗？此操作不会删除实际文件，只会从列表中移除。`,
+      showConfirm: true,
+      onConfirm: async () => {
+        try {
+          const response = await fetch('/api/openlist/delete', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ folder }),
+          });
+
+          if (!response.ok) {
+            const data = await response.json();
+            throw new Error(data.error || '删除失败');
+          }
+
+          showSuccess('删除成功', showAlert);
+          await fetchVideos(true); // 强制从数据库重新读取
+          refreshConfig(); // 异步刷新配置以更新资源数量（不等待，避免重复刷新）
+        } catch (error) {
+          showError(error instanceof Error ? error.message : '删除失败', showAlert);
+        }
+      },
+    });
+  };
+
+  const formatDate = (timestamp?: number) => {
+    if (!timestamp) return '未刷新';
+    return new Date(timestamp).toLocaleString('zh-CN');
+  };
+
+  return (
+    <div className='space-y-6'>
+      {/* 使用说明 */}
+      <div className='bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4'>
+        <div className='flex items-center gap-2 mb-2'>
+          <svg
+            className='w-5 h-5 text-blue-600 dark:text-blue-400'
+            fill='none'
+            stroke='currentColor'
+            viewBox='0 0 24 24'
+          >
+            <path
+              strokeLinecap='round'
+              strokeLinejoin='round'
+              strokeWidth={2}
+              d='M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z'
+            />
+          </svg>
+          <span className='text-sm font-medium text-blue-800 dark:text-blue-300'>
+            使用说明
+          </span>
+        </div>
+        <div className='text-sm text-blue-700 dark:text-blue-400 space-y-1'>
+          <p>• 私人影库功能需要配合 OpenList 使用，用于管理和播放您自己的视频文件</p>
+          <p>• OpenList 是一个开源的网盘聚合程序，支持多种存储后端（本地、阿里云盘、OneDrive 等）</p>
+          <p>• 配置后，系统会自动扫描指定目录下的视频文件夹，并通过 TMDB 匹配元数据信息</p>
+          <p>• 定时扫描间隔设置为 0 表示关闭自动扫描，最低间隔为 60 分钟</p>
+          <p>• 视频文件夹名称为影片名称，精准命名可以提高 TMDB 匹配准确率</p>
+
+        </div>
+      </div>
+
+      {/* 功能开关 */}
+      <div className='flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700'>
+        <div>
+          <h3 className='text-sm font-medium text-gray-900 dark:text-gray-100'>
+            启用私人影库功能
+          </h3>
+          <p className='text-xs text-gray-500 dark:text-gray-400 mt-1'>
+            关闭后将不显示私人影库入口，也不会执行定时扫描
+          </p>
+        </div>
+        <label className='relative inline-flex items-center cursor-pointer'>
+          <input
+            type='checkbox'
+            checked={enabled}
+            onChange={(e) => setEnabled(e.target.checked)}
+            className='sr-only peer'
+          />
+          <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-blue-600"></div>
+        </label>
+      </div>
+
+      {/* 配置表单 */}
+      <div className='space-y-4'>
+        <div>
+          <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'>
+            OpenList URL
+          </label>
+          <input
+            type='text'
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            disabled={!enabled}
+            placeholder='https://your-openlist-server.com'
+            className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:opacity-50 disabled:cursor-not-allowed'
+          />
+        </div>
+
+        <div className='grid grid-cols-2 gap-4'>
+          <div>
+            <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'>
+              账号
+            </label>
+            <input
+              type='text'
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              disabled={!enabled}
+              placeholder='admin'
+              className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:opacity-50 disabled:cursor-not-allowed'
+            />
+          </div>
+          <div>
+            <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'>
+              密码
+            </label>
+            <input
+              type='password'
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              disabled={!enabled}
+              placeholder='password'
+              className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:opacity-50 disabled:cursor-not-allowed'
+            />
+          </div>
+        </div>
+
+        <div>
+          <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'>
+            根目录
+          </label>
+          <input
+            type='text'
+            value={rootPath}
+            onChange={(e) => setRootPath(e.target.value)}
+            disabled={!enabled}
+            placeholder='/'
+            className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:opacity-50 disabled:cursor-not-allowed'
+          />
+          <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
+            OpenList 中的视频文件夹路径，默认为根目录 /
+          </p>
+        </div>
+
+        <div>
+          <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'>
+            定时扫描间隔（分钟）
+          </label>
+          <input
+            type='number'
+            value={scanInterval}
+            onChange={(e) => setScanInterval(parseInt(e.target.value) || 0)}
+            disabled={!enabled}
+            placeholder='0'
+            min='0'
+            className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:opacity-50 disabled:cursor-not-allowed'
+          />
+          <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
+            设置为 0 关闭定时扫描，最低 60 分钟
+          </p>
+        </div>
+
+        <div className='flex gap-3'>
+          <button
+            onClick={handleCheckConnectivity}
+            disabled={!enabled || !url || !username || !password || isLoading('checkOpenList')}
+            className={buttonStyles.primary}
+          >
+            {isLoading('checkOpenList') ? '检查中...' : '检查连通性'}
+          </button>
+          <button
+            onClick={handleSave}
+            disabled={isLoading('saveOpenList')}
+            className={buttonStyles.success}
+          >
+            {isLoading('saveOpenList') ? '保存中...' : '保存配置'}
+          </button>
+        </div>
+      </div>
+
+      {/* 视频列表区域 */}
+      {enabled && config?.OpenListConfig?.URL && config?.OpenListConfig?.Username && config?.OpenListConfig?.Password && (
+        <div className='space-y-4'>
+          <div className='flex items-center justify-between'>
+            <div>
+              <h3 className='text-lg font-medium text-gray-900 dark:text-gray-100'>
+                视频列表
+              </h3>
+              <div className='mt-1 text-sm text-gray-500 dark:text-gray-400'>
+                <span>资源数: {config.OpenListConfig.ResourceCount || 0}</span>
+                <span className='mx-2'>|</span>
+                <span>
+                  上次更新: {formatDate(config.OpenListConfig.LastRefreshTime)}
+                </span>
+              </div>
+            </div>
+            <div className='flex gap-3'>
+              <button
+                onClick={() => handleRefresh(true)}
+                disabled={refreshing}
+                className={buttonStyles.warning}
+              >
+                {refreshing ? '扫描中...' : '重新扫描'}
+              </button>
+              <button
+                onClick={() => handleRefresh(false)}
+                disabled={refreshing}
+                className={buttonStyles.primary}
+              >
+                {refreshing ? '扫描中...' : '立即扫描'}
+              </button>
+            </div>
+          </div>
+
+          {refreshing && scanProgress && (
+            <div className='bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4 mb-4'>
+              <div className='flex items-center justify-between mb-2'>
+                <span className='text-sm font-medium text-blue-900 dark:text-blue-100'>
+                  扫描进度: {scanProgress.current} / {scanProgress.total}
+                </span>
+                <span className='text-sm text-blue-700 dark:text-blue-300'>
+                  {scanProgress.total > 0
+                    ? Math.round((scanProgress.current / scanProgress.total) * 100)
+                    : 0}
+                  %
+                </span>
+              </div>
+              <div className='w-full bg-blue-200 dark:bg-blue-800 rounded-full h-2 mb-2'>
+                <div
+                  className='bg-blue-600 dark:bg-blue-500 h-2 rounded-full transition-all duration-300'
+                  style={{
+                    width: `${scanProgress.total > 0 ? (scanProgress.current / scanProgress.total) * 100 : 0}%`,
+                  }}
+                />
+              </div>
+              {scanProgress.currentFolder && (
+                <p className='text-xs text-blue-700 dark:text-blue-300'>
+                  正在处理: {scanProgress.currentFolder}
+                </p>
+              )}
+            </div>
+          )}
+
+          {refreshing ? (
+            <div className='text-center py-8 text-gray-500 dark:text-gray-400'>
+              加载中...
+            </div>
+          ) : videos.length > 0 ? (
+            <div className='overflow-x-auto'>
+              <table className='min-w-full divide-y divide-gray-200 dark:divide-gray-700'>
+                <thead className='bg-gray-50 dark:bg-gray-800'>
+                  <tr>
+                    <th className='px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider'>
+                      标题
+                    </th>
+                    <th className='px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider'>
+                      状态
+                    </th>
+                    <th className='px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider'>
+                      类型
+                    </th>
+                    <th className='px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider'>
+                      年份
+                    </th>
+                    <th className='px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider'>
+                      评分
+                    </th>
+                    <th className='px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider'>
+                      操作
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className='bg-white dark:bg-gray-900 divide-y divide-gray-200 dark:divide-gray-700'>
+                  {videos.map((video) => (
+                    <tr key={video.id} className={video.failed ? 'bg-red-50 dark:bg-red-900/10' : ''}>
+                      <td className='px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100'>
+                        {video.title}
+                      </td>
+                      <td className='px-6 py-4 whitespace-nowrap text-sm'>
+                        {video.failed ? (
+                          <span className='inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-200'>
+                            匹配失败
+                          </span>
+                        ) : (
+                          <span className='inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-200'>
+                            正常
+                          </span>
+                        )}
+                      </td>
+                      <td className='px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400'>
+                        {video.mediaType === 'movie' ? '电影' : '剧集'}
+                      </td>
+                      <td className='px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400'>
+                        {video.releaseDate ? video.releaseDate.split('-')[0] : '-'}
+                      </td>
+                      <td className='px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400'>
+                        {video.voteAverage > 0 ? video.voteAverage.toFixed(1) : '-'}
+                      </td>
+                      <td className='px-6 py-4 whitespace-nowrap text-right text-sm'>
+                        <div className='flex gap-2 justify-end'>
+                          {!video.failed && (
+                            <button
+                              onClick={() => handleRefreshVideo(video.folder)}
+                              className={buttonStyles.primarySmall}
+                            >
+                              刷新
+                            </button>
+                          )}
+                          <button
+                            onClick={() => {
+                              setSelectedVideo(video);
+                              setCorrectDialogOpen(true);
+                            }}
+                            className={video.failed ? buttonStyles.warningSmall : buttonStyles.successSmall}
+                          >
+                            {video.failed ? '立即纠错' : '纠错'}
+                          </button>
+                          <button
+                            onClick={() => handleDeleteVideo(video.folder, video.title)}
+                            className={buttonStyles.dangerSmall}
+                          >
+                            删除
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div className='text-center py-8 text-gray-500 dark:text-gray-400'>
+              暂无视频，请点击"立即扫描"扫描视频库
+            </div>
+          )}
+        </div>
+      )}
+
+      <AlertModal
+        isOpen={alertModal.isOpen}
+        onClose={hideAlert}
+        type={alertModal.type}
+        title={alertModal.title}
+        message={alertModal.message}
+        timer={alertModal.timer}
+        showConfirm={alertModal.showConfirm}
+        onConfirm={alertModal.onConfirm}
+      />
+
+      {/* 纠错对话框 */}
+      {selectedVideo && (
+        <CorrectDialog
+          isOpen={correctDialogOpen}
+          onClose={() => setCorrectDialogOpen(false)}
+          folder={selectedVideo.folder}
+          currentTitle={selectedVideo.title}
+          onCorrect={handleCorrectSuccess}
+        />
+      )}
     </div>
   );
 };
@@ -4601,6 +5401,10 @@ const SiteConfigComponent = ({
     DanmakuApiBase: 'http://localhost:9321',
     DanmakuApiToken: '87654321',
     TMDBApiKey: '',
+    TMDBProxy: '',
+    PansouApiUrl: '',
+    PansouUsername: '',
+    PansouPassword: '',
     EnableComments: false,
     EnableRegistration: false,
     RegistrationRequireTurnstile: false,
@@ -4684,6 +5488,10 @@ const SiteConfigComponent = ({
           config.SiteConfig.DanmakuApiBase || 'http://localhost:9321',
         DanmakuApiToken: config.SiteConfig.DanmakuApiToken || '87654321',
         TMDBApiKey: config.SiteConfig.TMDBApiKey || '',
+        TMDBProxy: config.SiteConfig.TMDBProxy || '',
+        PansouApiUrl: config.SiteConfig.PansouApiUrl || '',
+        PansouUsername: config.SiteConfig.PansouUsername || '',
+        PansouPassword: config.SiteConfig.PansouPassword || '',
         EnableComments: config.SiteConfig.EnableComments || false,
       });
     }
@@ -5180,7 +5988,15 @@ const SiteConfigComponent = ({
             className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-green-500 focus:border-transparent'
           />
           <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
-            弹幕服务器的 API 地址，默认为 http://localhost:9321
+            弹幕服务器的 API 地址，默认为 http://localhost:9321。API部署参考
+            <a
+              href='https://github.com/huangxd-/danmu_api.git'
+              target='_blank'
+              rel='noopener noreferrer'
+              className='text-blue-500 hover:text-blue-600 dark:text-blue-400 dark:hover:text-blue-300'
+            >
+              danmu_api
+            </a>
           </p>
         </div>
 
@@ -5240,6 +6056,109 @@ const SiteConfigComponent = ({
             >
               TMDB API 设置页面
             </a>
+          </p>
+        </div>
+
+        {/* TMDB Proxy */}
+        <div>
+          <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'>
+            TMDB 代理
+          </label>
+          <input
+            type='text'
+            placeholder='请输入代理地址（可选）'
+            value={siteSettings.TMDBProxy}
+            onChange={(e) =>
+              setSiteSettings((prev) => ({
+                ...prev,
+                TMDBProxy: e.target.value,
+              }))
+            }
+            className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-green-500 focus:border-transparent'
+          />
+          <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
+            配置代理服务器地址，用于访问 TMDB API（可选）
+          </p>
+        </div>
+      </div>
+
+      {/* Pansou 配置 */}
+      <div className='space-y-4 pt-4 border-t border-gray-200 dark:border-gray-700'>
+        <h3 className='text-sm font-semibold text-gray-900 dark:text-gray-100'>
+          Pansou 网盘搜索配置
+        </h3>
+
+        {/* Pansou API 地址 */}
+        <div>
+          <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'>
+            Pansou API 地址
+          </label>
+          <input
+            type='text'
+            placeholder='请输入 Pansou API 地址，如：http://localhost:8888'
+            value={siteSettings.PansouApiUrl}
+            onChange={(e) =>
+              setSiteSettings((prev) => ({
+                ...prev,
+                PansouApiUrl: e.target.value,
+              }))
+            }
+            className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-green-500 focus:border-transparent'
+          />
+          <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
+            配置 Pansou 服务器地址，用于网盘资源搜索。项目地址：{' '}
+            <a
+              href='https://github.com/fish2018/pansou'
+              target='_blank'
+              rel='noopener noreferrer'
+              className='text-blue-500 hover:text-blue-600 dark:text-blue-400 dark:hover:text-blue-300'
+            >
+              https://github.com/fish2018/pansou
+            </a>
+          </p>
+        </div>
+
+        {/* Pansou 账号 */}
+        <div>
+          <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'>
+            Pansou 账号（可选）
+          </label>
+          <input
+            type='text'
+            placeholder='如果 Pansou 启用了认证，请输入账号'
+            value={siteSettings.PansouUsername}
+            onChange={(e) =>
+              setSiteSettings((prev) => ({
+                ...prev,
+                PansouUsername: e.target.value,
+              }))
+            }
+            className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-green-500 focus:border-transparent'
+          />
+          <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
+            如果 Pansou 服务启用了认证功能，需要提供账号密码
+          </p>
+        </div>
+
+        {/* Pansou 密码 */}
+        <div>
+          <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'>
+            Pansou 密码（可选）
+          </label>
+          <input
+            type='password'
+            placeholder='如果 Pansou 启用了认证，请输入密码'
+            value={siteSettings.PansouPassword}
+            onChange={(e) =>
+              setSiteSettings((prev) => ({
+                ...prev,
+                PansouPassword: e.target.value,
+              }))
+            }
+            className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-green-500 focus:border-transparent'
+          />
+          <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
+            配置账号密码后，系统会自动登录并缓存 Token
           </p>
         </div>
       </div>
@@ -6984,6 +7903,7 @@ function AdminPageClient() {
   const [expandedTabs, setExpandedTabs] = useState<{ [key: string]: boolean }>({
     userConfig: false,
     videoSource: false,
+    openListConfig: false,
     liveSource: false,
     siteConfig: false,
     registrationConfig: false,
@@ -7023,17 +7943,67 @@ function AdminPageClient() {
     }
   }, []);
 
+  // 新版本用户列表状态
+  const [usersV2, setUsersV2] = useState<Array<{
+    username: string;
+    role: 'owner' | 'admin' | 'user';
+    banned: boolean;
+    tags?: string[];
+    enabledApis?: string[];
+    created_at: number;
+  }> | null>(null);
+
+  // 用户列表分页状态
+  const [userPage, setUserPage] = useState(1);
+  const [userTotalPages, setUserTotalPages] = useState(1);
+  const [userTotal, setUserTotal] = useState(0);
+  const [userListLoading, setUserListLoading] = useState(false);
+  const userLimit = 10;
+
+  // 获取新版本用户列表
+  const fetchUsersV2 = useCallback(async (page: number = 1) => {
+    try {
+      setUserListLoading(true);
+      const response = await fetch(`/api/admin/users?page=${page}&limit=${userLimit}`);
+      if (response.ok) {
+        const data = await response.json();
+        setUsersV2(data.users);
+        setUserTotalPages(data.totalPages || 1);
+        setUserTotal(data.total || 0);
+        setUserPage(page);
+      }
+    } catch (err) {
+      console.error('获取新版本用户列表失败:', err);
+    } finally {
+      setUserListLoading(false);
+    }
+  }, []);
+
+  // 刷新配置和用户列表
+  const refreshConfigAndUsers = useCallback(async () => {
+    await fetchConfig();
+    await fetchUsersV2(userPage); // 保持当前页码
+  }, [fetchConfig, fetchUsersV2, userPage]);
+
   useEffect(() => {
     // 首次加载时显示骨架
     fetchConfig(true);
+    // 不再自动获取用户列表，等用户打开用户管理选项卡时再获取
   }, [fetchConfig]);
 
   // 切换标签展开状态
   const toggleTab = (tabKey: string) => {
+    const wasExpanded = expandedTabs[tabKey];
+
     setExpandedTabs((prev) => ({
       ...prev,
       [tabKey]: !prev[tabKey],
     }));
+
+    // 当打开用户管理选项卡时，如果还没有加载用户列表，则加载
+    if (tabKey === 'userConfig' && !wasExpanded && !usersV2) {
+      fetchUsersV2();
+    }
   };
 
   // 新增: 重置配置处理函数
@@ -7182,7 +8152,13 @@ function AdminPageClient() {
               <UserConfig
                 config={config}
                 role={role}
-                refreshConfig={fetchConfig}
+                refreshConfig={refreshConfigAndUsers}
+                usersV2={usersV2}
+                userPage={userPage}
+                userTotalPages={userTotalPages}
+                userTotal={userTotal}
+                fetchUsersV2={fetchUsersV2}
+                userListLoading={userListLoading}
               />
             </CollapsibleTab>
 
@@ -7208,6 +8184,18 @@ function AdminPageClient() {
               onToggle={() => toggleTab('liveSource')}
             >
               <LiveSourceConfig config={config} refreshConfig={fetchConfig} />
+            </CollapsibleTab>
+
+            {/* 私人影库配置标签 */}
+            <CollapsibleTab
+              title='私人影库'
+              icon={
+                <FolderOpen size={20} className='text-gray-600 dark:text-gray-400' />
+              }
+              isExpanded={expandedTabs.openListConfig}
+              onToggle={() => toggleTab('openListConfig')}
+            >
+              <OpenListConfigComponent config={config} refreshConfig={fetchConfig} />
             </CollapsibleTab>
 
             {/* 分类配置标签 */}
@@ -7266,7 +8254,7 @@ function AdminPageClient() {
                 isExpanded={expandedTabs.dataMigration}
                 onToggle={() => toggleTab('dataMigration')}
               >
-                <DataMigration onRefreshConfig={fetchConfig} />
+                <DataMigration onRefreshConfig={refreshConfigAndUsers} />
               </CollapsibleTab>
             )}
           </div>

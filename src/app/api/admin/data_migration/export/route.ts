@@ -54,14 +54,26 @@ export async function POST(req: NextRequest) {
         // 管理员配置
         adminConfig: config,
         // 所有用户数据
-        userData: {} as { [username: string]: any }
+        userData: {} as { [username: string]: any },
+        // V2用户信息
+        usersV2: [] as any[]
       }
     };
 
-    // 获取所有用户
+    // 获取所有V2用户
+    const usersV2Result = await db.getUserListV2(0, 10000, process.env.USERNAME);
+    exportData.data.usersV2 = usersV2Result.users;
+
+    // 获取所有用户（包括旧版用户）
     let allUsers = await db.getAllUsers();
     // 添加站长用户
     allUsers.push(process.env.USERNAME);
+    // 添加V2用户
+    usersV2Result.users.forEach(user => {
+      if (!allUsers.includes(user.username)) {
+        allUsers.push(user.username);
+      }
+    });
     allUsers = Array.from(new Set(allUsers));
 
     // 为每个用户收集数据
@@ -76,7 +88,9 @@ export async function POST(req: NextRequest) {
         // 跳过片头片尾配置
         skipConfigs: await db.getAllSkipConfigs(username),
         // 用户密码（通过验证空密码来检查用户是否存在，然后获取密码）
-        password: await getUserPassword(username)
+        password: await getUserPassword(username),
+        // V2用户的加密密码
+        passwordV2: await getUserPasswordV2(username)
       };
 
       exportData.data.userData[username] = userData;
@@ -131,6 +145,22 @@ async function getUserPassword(username: string): Promise<string | null> {
     return null;
   } catch (error) {
     console.error(`获取用户 ${username} 密码失败:`, error);
+    return null;
+  }
+}
+
+// 辅助函数：获取V2用户的加密密码
+async function getUserPasswordV2(username: string): Promise<string | null> {
+  try {
+    const storage = (db as any).storage;
+    if (storage && typeof storage.client?.hget === 'function') {
+      const userInfoKey = `user:${username}:info`;
+      const password = await storage.client.hget(userInfoKey, 'password');
+      return password;
+    }
+    return null;
+  } catch (error) {
+    console.error(`获取用户 ${username} V2密码失败:`, error);
     return null;
   }
 }

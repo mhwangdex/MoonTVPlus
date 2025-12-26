@@ -1,0 +1,74 @@
+/* eslint-disable no-console */
+
+import { NextRequest, NextResponse } from 'next/server';
+
+import { getAuthInfoFromCookie } from '@/lib/auth';
+import { getConfig } from '@/lib/config';
+import { OpenListClient } from '@/lib/openlist.client';
+import { invalidateVideoInfoCache } from '@/lib/openlist-cache';
+
+export const runtime = 'nodejs';
+
+/**
+ * POST /api/openlist/refresh-video
+ * 刷新单个视频的 videoinfo.json
+ */
+export async function POST(request: NextRequest) {
+  try {
+    const authInfo = getAuthInfoFromCookie(request);
+    if (!authInfo || !authInfo.username) {
+      return NextResponse.json({ error: '未授权' }, { status: 401 });
+    }
+
+    const body = await request.json();
+    const { folder } = body;
+
+    if (!folder) {
+      return NextResponse.json({ error: '缺少参数' }, { status: 400 });
+    }
+
+    const config = await getConfig();
+    const openListConfig = config.OpenListConfig;
+
+    if (
+      !openListConfig ||
+      !openListConfig.Enabled ||
+      !openListConfig.URL ||
+      !openListConfig.Username ||
+      !openListConfig.Password
+    ) {
+      return NextResponse.json({ error: 'OpenList 未配置或未启用' }, { status: 400 });
+    }
+
+    const rootPath = openListConfig.RootPath || '/';
+    const folderPath = `${rootPath}${rootPath.endsWith('/') ? '' : '/'}${folder}`;
+    const client = new OpenListClient(
+      openListConfig.URL,
+      openListConfig.Username,
+      openListConfig.Password
+    );
+
+    // 删除 videoinfo.json
+    const videoinfoPath = `${folderPath}/videoinfo.json`;
+
+    try {
+      await client.deleteFile(videoinfoPath);
+    } catch (error) {
+      console.log('videoinfo.json 不存在或删除失败');
+    }
+
+    // 清除缓存
+    invalidateVideoInfoCache(folderPath);
+
+    return NextResponse.json({
+      success: true,
+      message: '刷新成功',
+    });
+  } catch (error) {
+    console.error('刷新视频失败:', error);
+    return NextResponse.json(
+      { error: '刷新失败', details: (error as Error).message },
+      { status: 500 }
+    );
+  }
+}

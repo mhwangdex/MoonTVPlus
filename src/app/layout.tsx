@@ -62,6 +62,7 @@ export default async function RootLayout({
   let fluidSearch = process.env.NEXT_PUBLIC_FLUID_SEARCH !== 'false';
   let enableComments = false;
   let tmdbApiKey = '';
+  let openListEnabled = false;
   let customCategories = [] as {
     name: string;
     type: 'movie' | 'tv';
@@ -87,6 +88,13 @@ export default async function RootLayout({
     fluidSearch = config.SiteConfig.FluidSearch;
     enableComments = config.SiteConfig.EnableComments;
     tmdbApiKey = config.SiteConfig.TMDBApiKey || '';
+    // 检查是否启用了 OpenList 功能
+    openListEnabled = !!(
+      config.OpenListConfig?.Enabled &&
+      config.OpenListConfig?.URL &&
+      config.OpenListConfig?.Username &&
+      config.OpenListConfig?.Password
+    );
   }
 
   // 将运行时配置注入到全局 window 对象，供客户端在运行时读取
@@ -103,6 +111,7 @@ export default async function RootLayout({
     ENABLE_TVBOX_SUBSCRIBE: process.env.ENABLE_TVBOX_SUBSCRIBE === 'true',
     ENABLE_OFFLINE_DOWNLOAD: process.env.NEXT_PUBLIC_ENABLE_OFFLINE_DOWNLOAD === 'true',
     VOICE_CHAT_STRATEGY: process.env.NEXT_PUBLIC_VOICE_CHAT_STRATEGY || 'webrtc-fallback',
+    OPENLIST_ENABLED: openListEnabled,
   };
 
   return (

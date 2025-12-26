@@ -2,7 +2,7 @@
 
 'use client';
 
-import { Heart } from 'lucide-react';
+import { Heart, Search, X, Cloud } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Suspense, useEffect, useRef, useState } from 'react';
 
@@ -48,6 +48,7 @@ import DoubanComments from '@/components/DoubanComments';
 import DanmakuFilterSettings from '@/components/DanmakuFilterSettings';
 import Toast, { ToastProps } from '@/components/Toast';
 import { useEnableComments } from '@/hooks/useEnableComments';
+import PansouSearch from '@/components/PansouSearch';
 
 // 扩展 HTMLVideoElement 类型以支持 hls 属性
 declare global {
@@ -95,6 +96,9 @@ function PlayPageClient() {
 
   // 收藏状态
   const [favorited, setFavorited] = useState(false);
+
+  // 网盘搜索弹窗状态
+  const [showPansouDialog, setShowPansouDialog] = useState(false);
 
   // 跳过片头片尾配置
   const [skipConfig, setSkipConfig] = useState<{
@@ -288,6 +292,32 @@ function PlayPageClient() {
   const [danmakuCount, setDanmakuCount] = useState(0);
   const danmakuPluginRef = useRef<any>(null);
   const danmakuSettingsRef = useRef(danmakuSettings);
+
+  // 弹幕热力图完全禁用开关（默认不禁用，即启用热力图功能）
+  const [danmakuHeatmapDisabled, setDanmakuHeatmapDisabled] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      const v = localStorage.getItem('danmaku_heatmap_disabled');
+      if (v !== null) return v === 'true';
+    }
+    return false; // 默认不禁用
+  });
+  const danmakuHeatmapDisabledRef = useRef(danmakuHeatmapDisabled);
+  useEffect(() => {
+    danmakuHeatmapDisabledRef.current = danmakuHeatmapDisabled;
+  }, [danmakuHeatmapDisabled]);
+
+  // 弹幕热力图开关（默认开启）
+  const [danmakuHeatmapEnabled, setDanmakuHeatmapEnabled] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      const v = localStorage.getItem('danmaku_heatmap_enabled');
+      if (v !== null) return v === 'true';
+    }
+    return true; // 默认开启
+  });
+  const danmakuHeatmapEnabledRef = useRef(danmakuHeatmapEnabled);
+  useEffect(() => {
+    danmakuHeatmapEnabledRef.current = danmakuHeatmapEnabled;
+  }, [danmakuHeatmapEnabled]);
 
   // 多条弹幕匹配结果
   const [danmakuMatches, setDanmakuMatches] = useState<DanmakuAnime[]>([]);
@@ -602,9 +632,9 @@ function PlayPageClient() {
   // 工具函数（Utils）
   // -----------------------------------------------------------------------------
 
-  // 判断剧集是否已完结
-  const isSeriesCompleted = (detail: SearchResult | null): boolean => {
-    if (!detail) return false;
+  // 判断剧集状态
+  const getSeriesStatus = (detail: SearchResult | null): 'completed' | 'ongoing' | 'unknown' => {
+    if (!detail) return 'unknown';
 
     // 方法1：通过 vod_remarks 判断
     if (detail.vod_remarks) {
@@ -616,23 +646,27 @@ function PlayPageClient() {
 
       // 如果包含连载关键词，则为连载中
       if (ongoingKeywords.some(keyword => remarks.includes(keyword))) {
-        return false;
+        return 'ongoing';
       }
 
       // 如果包含完结关键词，则为已完结
       if (completedKeywords.some(keyword => remarks.includes(keyword))) {
-        return true;
+        return 'completed';
       }
     }
 
     // 方法2：通过 vod_total 和实际集数对比判断
     if (detail.vod_total && detail.vod_total > 0 && detail.episodes && detail.episodes.length > 0) {
       // 如果实际集数 >= 总集数，则为已完结
-      return detail.episodes.length >= detail.vod_total;
+      if (detail.episodes.length >= detail.vod_total) {
+        return 'completed';
+      }
+      // 如果实际集数 < 总集数，则为连载中
+      return 'ongoing';
     }
 
-    // 无法判断，默认返回 false（连载中）
-    return false;
+    // 无法判断，返回 unknown
+    return 'unknown';
   };
 
   // 播放源优选函数
@@ -1772,7 +1806,9 @@ function PlayPageClient() {
               ? result.year.toLowerCase() === videoYearRef.current.toLowerCase()
               : true) &&
             (searchType
-              ? (searchType === 'tv' && result.episodes.length > 1) ||
+              ? // openlist 源跳过 episodes 长度检查，因为搜索时不返回详细播放列表
+                result.source === 'openlist' ||
+                (searchType === 'tv' && result.episodes.length > 1) ||
                 (searchType === 'movie' && result.episodes.length === 1)
               : true)
         );
@@ -1825,6 +1861,15 @@ function PlayPageClient() {
         );
         if (target) {
           detailData = target;
+
+          // 如果是 openlist 源且 episodes 为空，需要调用 detail 接口获取完整信息
+          if (detailData.source === 'openlist' && (!detailData.episodes || detailData.episodes.length === 0)) {
+            console.log('[Play] OpenList source has no episodes, fetching detail...');
+            const detailSources = await fetchSourceDetail(currentSource, currentId);
+            if (detailSources.length > 0) {
+              detailData = detailSources[0];
+            }
+          }
         } else {
           setError('未找到匹配结果');
           setLoading(false);
@@ -1844,6 +1889,15 @@ function PlayPageClient() {
       }
 
       console.log(detailData.source, detailData.id);
+
+      // 如果是 openlist 源且 episodes 为空，需要调用 detail 接口获取完整信息
+      if (detailData.source === 'openlist' && (!detailData.episodes || detailData.episodes.length === 0)) {
+        console.log('[Play] OpenList source has no episodes after selection, fetching detail...');
+        const detailSources = await fetchSourceDetail(detailData.source, detailData.id);
+        if (detailSources.length > 0) {
+          detailData = detailSources[0];
+        }
+      }
 
       setNeedPrefer(false);
       setCurrentSource(detailData.source);
@@ -2283,6 +2337,17 @@ function PlayPageClient() {
       setDanmakuCount(0);
     } finally {
       setDanmakuLoading(false);
+
+      // 弹幕加载完成后，根据用户设置显示或隐藏热力图（仅在未禁用热力图时）
+      if (!danmakuHeatmapDisabledRef.current) {
+        const heatmapElement = document.querySelector('.art-control-heatmap') as HTMLElement;
+        if (heatmapElement) {
+          const isEnabled = danmakuHeatmapEnabledRef.current;
+          heatmapElement.style.opacity = isEnabled ? '1' : '0';
+          heatmapElement.style.pointerEvents = isEnabled ? 'auto' : 'none';
+          console.log('弹幕加载完成，热力图状态:', isEnabled ? '显示' : '隐藏');
+        }
+      }
     }
   };
 
@@ -2837,7 +2902,7 @@ function PlayPageClient() {
           total_episodes: detailRef.current?.episodes.length || 1,
           save_time: Date.now(),
           search_title: searchTitle,
-          is_completed: isSeriesCompleted(detailRef.current),
+          is_completed: getSeriesStatus(detailRef.current) === 'completed',
           vod_remarks: detailRef.current?.vod_remarks,
         });
         setFavorited(true);
@@ -3108,6 +3173,7 @@ function PlayPageClient() {
             antiOverlap: true,
             synchronousPlayback: danmakuSettingsRef.current.synchronousPlayback,
             emitter: false,
+            heatmap: !danmakuHeatmapDisabledRef.current, // 根据禁用状态决定是否创建热力图
             // 主题
             theme: 'dark',
             filter: (danmu: any) => {
@@ -3188,6 +3254,33 @@ function PlayPageClient() {
               return '打开设置';
             },
           },
+          // 只有在未禁用热力图时才显示热力图开关
+          ...(!danmakuHeatmapDisabledRef.current ? [{
+            name: '弹幕热力',
+            html: '弹幕热力',
+            icon: '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M3 13h2v-2H3v2zm0 4h2v-2H3v2zm0-8h2V7H3v2zm4 4h14v-2H7v2zm0 4h14v-2H7v2zM7 7v2h14V7H7z" fill="#ffffff"/></svg>',
+            switch: danmakuHeatmapEnabledRef.current,
+            onSwitch: function (item: any) {
+              const newVal = !item.switch;
+              try {
+                localStorage.setItem('danmaku_heatmap_enabled', String(newVal));
+                setDanmakuHeatmapEnabled(newVal);
+
+                // 使用 opacity 控制热力图显示/隐藏
+                const heatmapElement = document.querySelector('.art-control-heatmap') as HTMLElement;
+                if (heatmapElement) {
+                  heatmapElement.style.opacity = newVal ? '1' : '0';
+                  heatmapElement.style.pointerEvents = newVal ? 'auto' : 'none';
+                  console.log('弹幕热力已', newVal ? '开启' : '关闭');
+                } else {
+                  console.warn('未找到热力图元素');
+                }
+              } catch (err) {
+                console.error('切换弹幕热力失败:', err);
+              }
+              return newVal;
+            },
+          }] : []),
           ...(webGPUSupported ? [
             {
               name: 'Anime4K超分',
@@ -3872,6 +3965,16 @@ function PlayPageClient() {
             danmakuPluginRef.current.hide();
           }
 
+          // 初始隐藏热力图，等待弹幕加载完成后再显示（仅在未禁用热力图时）
+          if (!danmakuHeatmapDisabledRef.current) {
+            const heatmapElement = document.querySelector('.art-control-heatmap') as HTMLElement;
+            if (heatmapElement) {
+              heatmapElement.style.opacity = '0';
+              heatmapElement.style.pointerEvents = 'none';
+              console.log('热力图初始状态: 隐藏（等待弹幕加载）');
+            }
+          }
+
           // 自动搜索并加载弹幕
           await autoSearchDanmaku();
         }
@@ -4404,17 +4507,22 @@ function PlayPageClient() {
               )}
             </span>
             {/* 完结状态标识 */}
-            {detail && totalEpisodes > 1 && (
-              <span
-                className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                  isSeriesCompleted(detail)
-                    ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300'
-                    : 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300'
-                }`}
-              >
-                {isSeriesCompleted(detail) ? '已完结' : '连载中'}
-              </span>
-            )}
+            {detail && totalEpisodes > 1 && (() => {
+              const status = getSeriesStatus(detail);
+              if (status === 'unknown') return null;
+
+              return (
+                <span
+                  className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                    status === 'completed'
+                      ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300'
+                      : 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300'
+                  }`}
+                >
+                  {status === 'completed' ? '已完结' : '连载中'}
+                </span>
+              );
+            })()}
           </h1>
         </div>
         {/* 第二行：播放器和选集 */}
@@ -4890,6 +4998,17 @@ function PlayPageClient() {
                 >
                   <FavoriteIcon filled={favorited} />
                 </button>
+                {/* 网盘搜索按钮 */}
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setShowPansouDialog(true);
+                  }}
+                  className='flex-shrink-0 hover:opacity-80 transition-opacity'
+                  title='搜索网盘资源'
+                >
+                  <Cloud className='h-6 w-6 text-gray-700 dark:text-gray-300' />
+                </button>
                 {/* 豆瓣评分显示 */}
                 {doubanRating && doubanRating.value > 0 && (
                   <div className='flex items-center gap-2 text-base font-normal'>
@@ -5107,6 +5226,40 @@ function PlayPageClient() {
           });
         }}
       />
+
+      {/* 网盘搜索弹窗 */}
+      {showPansouDialog && (
+        <div
+          className='fixed inset-0 z-[10000] flex items-center justify-center bg-black/50'
+          onClick={() => setShowPansouDialog(false)}
+        >
+          <div
+            className='relative w-full max-w-4xl max-h-[80vh] overflow-y-auto bg-white dark:bg-gray-900 rounded-lg shadow-xl m-4'
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* 弹窗头部 */}
+            <div className='sticky top-0 z-10 flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900'>
+              <h2 className='text-xl font-bold text-gray-900 dark:text-gray-100'>
+                搜索网盘资源: {detail?.title || ''}
+              </h2>
+              <button
+                onClick={() => setShowPansouDialog(false)}
+                className='p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors'
+              >
+                <X className='h-5 w-5 text-gray-600 dark:text-gray-400' />
+              </button>
+            </div>
+
+            {/* 弹窗内容 */}
+            <div className='p-4'>
+              <PansouSearch
+                keyword={detail?.title || ''}
+                triggerSearch={showPansouDialog}
+              />
+            </div>
+          </div>
+        </div>
+      )}
     </PageLayout>
   );
 }

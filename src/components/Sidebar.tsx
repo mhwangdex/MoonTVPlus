@@ -2,7 +2,7 @@
 
 'use client';
 
-import { Cat, Clover, Film, Home, Menu, Radio, Search, Star, Tv, Users } from 'lucide-react';
+import { Cat, Clover, Film, FolderOpen, Home, Menu, Radio, Search, Star, Tv, Users } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname, useSearchParams } from 'next/navigation';
 import {
@@ -178,6 +178,15 @@ const Sidebar = ({ onToggle, activePath = '/' }: SidebarProps) => {
         href: '/live',
       },
     ];
+
+    // 如果配置了 OpenList，添加私人影库入口
+    if (runtimeConfig?.OPENLIST_ENABLED) {
+      items.push({
+        icon: FolderOpen,
+        label: '私人影库',
+        href: '/private-library',
+      });
+    }
 
     // 如果启用观影室，添加观影室入口
     if (watchRoomContext?.isEnabled) {
