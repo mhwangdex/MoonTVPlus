@@ -157,8 +157,27 @@ export function WatchRoomProvider({ children }: WatchRoomProviderProps) {
             enabled: data.WatchRoom?.enabled ?? false, // 默认不启用
             serverType: data.WatchRoom?.serverType ?? 'internal',
             externalServerUrl: data.WatchRoom?.externalServerUrl,
-            externalServerAuth: data.WatchRoom?.externalServerAuth,
           };
+
+          // 如果使用外部服务器，需要获取认证信息（需要登录）
+          if (watchRoomConfig.serverType === 'external' && watchRoomConfig.enabled) {
+            try {
+              const authResponse = await fetch('/api/watch-room-auth');
+              if (authResponse.ok) {
+                const authData = await authResponse.json();
+                watchRoomConfig.externalServerAuth = authData.externalServerAuth;
+              } else {
+                console.error('[WatchRoom] Failed to load auth info:', authResponse.status);
+                // 如果无法获取认证信息，禁用观影室
+                watchRoomConfig.enabled = false;
+              }
+            } catch (error) {
+              console.error('[WatchRoom] Error loading auth info:', error);
+              // 如果无法获取认证信息，禁用观影室
+              watchRoomConfig.enabled = false;
+            }
+          }
+
           setConfig(watchRoomConfig);
           setIsEnabled(watchRoomConfig.enabled);
 

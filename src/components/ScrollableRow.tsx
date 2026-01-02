@@ -4,11 +4,13 @@ import { useEffect, useRef, useState } from 'react';
 interface ScrollableRowProps {
   children: React.ReactNode;
   scrollDistance?: number;
+  bottomPadding?: string;
 }
 
 export default function ScrollableRow({
   children,
   scrollDistance = 1000,
+  bottomPadding = 'pb-12 sm:pb-14',
 }: ScrollableRowProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [showLeftScroll, setShowLeftScroll] = useState(false);
@@ -102,7 +104,7 @@ export default function ScrollableRow({
     >
       <div
         ref={containerRef}
-        className='flex space-x-6 overflow-x-auto scrollbar-hide py-1 sm:py-2 pb-12 sm:pb-14 px-4 sm:px-6'
+        className={`flex space-x-2 sm:space-x-4 overflow-x-auto scrollbar-hide py-1 sm:py-2 ${bottomPadding} px-4 sm:px-6`}
         onScroll={checkScroll}
       >
         {children}

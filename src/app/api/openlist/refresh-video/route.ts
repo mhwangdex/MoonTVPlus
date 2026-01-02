@@ -48,15 +48,6 @@ export async function POST(request: NextRequest) {
       openListConfig.Password
     );
 
-    // 删除 videoinfo.json
-    const videoinfoPath = `${folderPath}/videoinfo.json`;
-
-    try {
-      await client.deleteFile(videoinfoPath);
-    } catch (error) {
-      console.log('videoinfo.json 不存在或删除失败');
-    }
-
     // 清除缓存
     invalidateVideoInfoCache(folderPath);
 

@@ -132,11 +132,7 @@ export class DbManager {
     return favorite !== null;
   }
 
-  // ---------- 用户相关（旧版本，保持兼容） ----------
-  async registerUser(userName: string, password: string): Promise<void> {
-    await this.storage.registerUser(userName, password);
-  }
-
+ 
   async verifyUser(userName: string, password: string): Promise<boolean> {
     return this.storage.verifyUser(userName, password);
   }
@@ -182,6 +178,9 @@ export class DbManager {
     oidcSub?: string;
     enabledApis?: string[];
     created_at: number;
+    playrecord_migrated?: boolean;
+    favorite_migrated?: boolean;
+    skip_migrated?: boolean;
   } | null> {
     if (typeof (this.storage as any).getUserInfoV2 === 'function') {
       return (this.storage as any).getUserInfoV2(userName);
@@ -257,6 +256,27 @@ export class DbManager {
       return (this.storage as any).getUsersByTag(tagName);
     }
     return [];
+  }
+
+  // ---------- 播放记录迁移 ----------
+  async migratePlayRecords(userName: string): Promise<void> {
+    if (typeof (this.storage as any).migratePlayRecords === 'function') {
+      await (this.storage as any).migratePlayRecords(userName);
+    }
+  }
+
+  // ---------- 收藏迁移 ----------
+  async migrateFavorites(userName: string): Promise<void> {
+    if (typeof (this.storage as any).migrateFavorites === 'function') {
+      await (this.storage as any).migrateFavorites(userName);
+    }
+  }
+
+  // ---------- 跳过配置迁移 ----------
+  async migrateSkipConfigs(userName: string): Promise<void> {
+    if (typeof (this.storage as any).migrateSkipConfigs === 'function') {
+      await (this.storage as any).migrateSkipConfigs(userName);
+    }
   }
 
   // ---------- 数据迁移 ----------

@@ -32,6 +32,11 @@ function getDoubanImageProxyConfig(): {
 export function processImageUrl(originalUrl: string): string {
   if (!originalUrl) return originalUrl;
 
+  // 如果已经是代理URL，直接返回
+  if (originalUrl.startsWith('/api/image-proxy')) {
+    return originalUrl;
+  }
+
   // 仅处理豆瓣图片代理
   if (!originalUrl.includes('doubanio.com')) {
     return originalUrl;

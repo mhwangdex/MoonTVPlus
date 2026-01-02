@@ -61,8 +61,22 @@ export default async function RootLayout({
     process.env.NEXT_PUBLIC_DISABLE_YELLOW_FILTER === 'true';
   let fluidSearch = process.env.NEXT_PUBLIC_FLUID_SEARCH !== 'false';
   let enableComments = false;
+  let recommendationDataSource = 'Mixed';
   let tmdbApiKey = '';
   let openListEnabled = false;
+  let loginBackgroundImage = '';
+  let registerBackgroundImage = '';
+  let enableRegistration = false;
+  let loginRequireTurnstile = false;
+  let registrationRequireTurnstile = false;
+  let turnstileSiteKey = '';
+  let enableOIDCLogin = false;
+  let enableOIDCRegistration = false;
+  let oidcButtonText = '';
+  let aiEnabled = false;
+  let aiEnableHomepageEntry = false;
+  let aiEnableVideoCardEntry = false;
+  let aiEnablePlayPageEntry = false;
   let customCategories = [] as {
     name: string;
     type: 'movie' | 'tv';
@@ -87,7 +101,22 @@ export default async function RootLayout({
     }));
     fluidSearch = config.SiteConfig.FluidSearch;
     enableComments = config.SiteConfig.EnableComments;
+    recommendationDataSource = config.SiteConfig.RecommendationDataSource || 'Mixed';
     tmdbApiKey = config.SiteConfig.TMDBApiKey || '';
+    loginBackgroundImage = config.ThemeConfig?.loginBackgroundImage || '';
+    registerBackgroundImage = config.ThemeConfig?.registerBackgroundImage || '';
+    enableRegistration = config.SiteConfig.EnableRegistration || false;
+    loginRequireTurnstile = config.SiteConfig.LoginRequireTurnstile || false;
+    registrationRequireTurnstile = config.SiteConfig.RegistrationRequireTurnstile || false;
+    turnstileSiteKey = config.SiteConfig.TurnstileSiteKey || '';
+    enableOIDCLogin = config.SiteConfig.EnableOIDCLogin || false;
+    enableOIDCRegistration = config.SiteConfig.EnableOIDCRegistration || false;
+    oidcButtonText = config.SiteConfig.OIDCButtonText || '';
+    // AI配置
+    aiEnabled = config.AIConfig?.Enabled || false;
+    aiEnableHomepageEntry = config.AIConfig?.EnableHomepageEntry || false;
+    aiEnableVideoCardEntry = config.AIConfig?.EnableVideoCardEntry || false;
+    aiEnablePlayPageEntry = config.AIConfig?.EnablePlayPageEntry || false;
     // 检查是否启用了 OpenList 功能
     openListEnabled = !!(
       config.OpenListConfig?.Enabled &&
@@ -108,10 +137,25 @@ export default async function RootLayout({
     CUSTOM_CATEGORIES: customCategories,
     FLUID_SEARCH: fluidSearch,
     EnableComments: enableComments,
+    RecommendationDataSource: recommendationDataSource,
     ENABLE_TVBOX_SUBSCRIBE: process.env.ENABLE_TVBOX_SUBSCRIBE === 'true',
     ENABLE_OFFLINE_DOWNLOAD: process.env.NEXT_PUBLIC_ENABLE_OFFLINE_DOWNLOAD === 'true',
     VOICE_CHAT_STRATEGY: process.env.NEXT_PUBLIC_VOICE_CHAT_STRATEGY || 'webrtc-fallback',
     OPENLIST_ENABLED: openListEnabled,
+    LOGIN_BACKGROUND_IMAGE: loginBackgroundImage,
+    REGISTER_BACKGROUND_IMAGE: registerBackgroundImage,
+    ENABLE_REGISTRATION: enableRegistration,
+    LOGIN_REQUIRE_TURNSTILE: loginRequireTurnstile,
+    REGISTRATION_REQUIRE_TURNSTILE: registrationRequireTurnstile,
+    TURNSTILE_SITE_KEY: turnstileSiteKey,
+    ENABLE_OIDC_LOGIN: enableOIDCLogin,
+    ENABLE_OIDC_REGISTRATION: enableOIDCRegistration,
+    OIDC_BUTTON_TEXT: oidcButtonText,
+    AI_ENABLED: aiEnabled,
+    AI_ENABLE_HOMEPAGE_ENTRY: aiEnableHomepageEntry,
+    AI_ENABLE_VIDEOCARD_ENTRY: aiEnableVideoCardEntry,
+    AI_ENABLE_PLAYPAGE_ENTRY: aiEnablePlayPageEntry,
+    ENABLE_SOURCE_SEARCH: process.env.NEXT_PUBLIC_ENABLE_SOURCE_SEARCH !== 'false',
   };
 
   return (

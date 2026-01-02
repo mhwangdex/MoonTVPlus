@@ -8,6 +8,7 @@ interface CachedUserInfo {
   oidcSub?: string;
   enabledApis?: string[];
   created_at: number;
+  playrecord_migrated?: boolean;
   cachedAt: number;
 }
 

@@ -4,6 +4,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { getAuthInfoFromCookie } from '@/lib/auth';
 import { getConfig } from '@/lib/config';
+import { getNextApiKey } from '@/lib/tmdb.client';
 import { HttpsProxyAgent } from 'https-proxy-agent';
 import nodeFetch from 'node-fetch';
 
@@ -31,7 +32,8 @@ export async function GET(request: NextRequest) {
     const tmdbApiKey = config.SiteConfig.TMDBApiKey;
     const tmdbProxy = config.SiteConfig.TMDBProxy;
 
-    if (!tmdbApiKey) {
+    const actualKey = getNextApiKey(tmdbApiKey || '');
+    if (!actualKey) {
       return NextResponse.json(
         { error: 'TMDB API Key 未配置' },
         { status: 400 }
@@ -39,7 +41,7 @@ export async function GET(request: NextRequest) {
     }
 
     // 使用 multi search 同时搜索电影和电视剧
-    const url = `https://api.themoviedb.org/3/search/multi?api_key=${tmdbApiKey}&language=zh-CN&query=${encodeURIComponent(query)}&page=1`;
+    const url = `https://api.themoviedb.org/3/search/multi?api_key=${actualKey}&language=zh-CN&query=${encodeURIComponent(query)}&page=1`;
 
     const fetchOptions: any = tmdbProxy
       ? {

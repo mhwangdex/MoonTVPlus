@@ -1,6 +1,34 @@
 import CryptoJS from 'crypto-js';
 
 /**
+ * 生成 SHA256 哈希值
+ * @param data 要哈希的数据
+ * @returns SHA256 哈希值（十六进制字符串）
+ */
+export function sha256(data: string): string {
+  return CryptoJS.SHA256(data).toString(CryptoJS.enc.Hex);
+}
+
+/**
+ * 生成文件夹的唯一 key
+ * @param folderName 文件夹名称
+ * @param existingKeys 已存在的 key 集合，用于检测冲突
+ * @returns 唯一的 key（SHA256 的前10位）
+ */
+export function generateFolderKey(folderName: string, existingKeys: Set<string> = new Set()): string {
+  let hash = sha256(folderName);
+  let key = hash.substring(0, 10);
+
+  // 如果遇到冲突，继续 sha256 直到不冲突
+  while (existingKeys.has(key)) {
+    hash = sha256(hash);
+    key = hash.substring(0, 10);
+  }
+
+  return key;
+}
+
+/**
  * 简单的对称加密工具
  * 使用 AES 加密算法
  */

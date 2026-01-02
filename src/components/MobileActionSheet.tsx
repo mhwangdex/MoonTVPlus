@@ -1,6 +1,7 @@
 import { Radio, X } from 'lucide-react';
 import Image from 'next/image';
 import React, { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 
 interface ActionItem {
   id: string;
@@ -40,6 +41,12 @@ const MobileActionSheet: React.FC<MobileActionSheetProps> = ({
 }) => {
   const [isVisible, setIsVisible] = useState(false);
   const [isAnimating, setIsAnimating] = useState(false);
+  const [mounted, setMounted] = useState(false);
+
+  // 确保组件在客户端挂载后才渲染 Portal
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   // 控制动画状态
   useEffect(() => {
@@ -136,7 +143,7 @@ const MobileActionSheet: React.FC<MobileActionSheetProps> = ({
     }
   }, [isVisible, onClose]);
 
-  if (!isVisible) return null;
+  if (!isVisible || !mounted) return null;
 
   const getActionColor = (color: ActionItem['color']) => {
     switch (color) {
@@ -160,7 +167,7 @@ const MobileActionSheet: React.FC<MobileActionSheetProps> = ({
     }
   };
 
-  return (
+  const content = (
     <div
       className="fixed inset-0 z-[9999] flex items-end justify-center"
       onTouchMove={(e) => {
@@ -344,6 +351,9 @@ const MobileActionSheet: React.FC<MobileActionSheetProps> = ({
       </div>
     </div>
   );
+
+  // 使用 Portal 将组件渲染到 document.body
+  return createPortal(content, document.body);
 };
 
 export default MobileActionSheet;

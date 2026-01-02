@@ -44,6 +44,8 @@ interface EpisodeSelectorProps {
   availableSources?: SearchResult[];
   sourceSearchLoading?: boolean;
   sourceSearchError?: string | null;
+  /** 后台源加载状态 */
+  backgroundSourcesLoading?: boolean;
   /** 预计算的测速结果，避免重复测速 */
   precomputedVideoInfo?: Map<string, VideoInfo>;
   /** 弹幕相关 */
@@ -73,6 +75,7 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
   availableSources = [],
   sourceSearchLoading = false,
   sourceSearchError = null,
+  backgroundSourcesLoading = false,
   precomputedVideoInfo,
   onDanmakuSelect,
   currentDanmakuSelection,
@@ -295,6 +298,42 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
     fetchVideoInfosInBatches();
     // 依赖项保持与之前一致
   }, [activeTab, availableSources, getVideoInfo, optimizationEnabled, initialTestingCompleted, currentSource]);
+
+  // 监听后台加载完成，触发自动测速
+  const prevBackgroundLoadingRef = useRef<boolean>(false);
+  useEffect(() => {
+    // 当后台加载从 true 变为 false 时（即加载完成）
+    if (prevBackgroundLoadingRef.current && !backgroundSourcesLoading) {
+      // 如果当前选项卡在换源位置，触发测速
+      if (activeTab === 'sources' && optimizationEnabled && currentSource !== 'openlist') {
+        // 筛选出尚未测速的播放源
+        const pendingSources = availableSources.filter((source) => {
+          const sourceKey = `${source.source}-${source.id}`;
+          return !attemptedSourcesRef.current.has(sourceKey);
+        });
+
+        if (pendingSources.length > 0) {
+          const batchSize = Math.ceil(pendingSources.length / 2);
+
+          const fetchInBatches = async () => {
+            for (let start = 0; start < pendingSources.length; start += batchSize) {
+              const batch = pendingSources.slice(start, start + batchSize);
+              await Promise.all(batch.map(getVideoInfo));
+            }
+
+            if (!initialTestingCompleted) {
+              setInitialTestingCompleted(true);
+            }
+          };
+
+          fetchInBatches();
+        }
+      }
+    }
+
+    // 更新前一次的加载状态
+    prevBackgroundLoadingRef.current = backgroundSourcesLoading;
+  }, [backgroundSourcesLoading, activeTab, availableSources, getVideoInfo, optimizationEnabled, initialTestingCompleted, currentSource]);
 
   // 升序分页标签
   const categoriesAsc = useMemo(() => {
@@ -628,7 +667,7 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
                       className={`h-10 min-w-10 px-3 py-2 flex items-center justify-center text-sm font-medium rounded-md transition-all duration-200 whitespace-nowrap font-mono
                         ${isActive
                           ? 'bg-green-500 text-white shadow-lg shadow-green-500/25 dark:bg-green-600'
-                          : 'bg-gray-200 text-gray-700 hover:bg-gray-300 hover:scale-105 dark:bg-white/10 dark:text-gray-300 dark:hover:bg-white/20'
+                          : 'bg-gray-200 text-gray-700 hover:bg-gray-300 hover:scale-105 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600'
                         }`.trim()}
                     >
                       {(() => {
@@ -738,7 +777,7 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
                       >
                         {/* 封面 */}
                         <div className='flex-shrink-0 w-12 h-20 bg-gray-300 dark:bg-gray-600 rounded overflow-hidden'>
-                          {source.episodes && source.episodes.length > 0 && (
+                          {source.poster && (
                             <img
                               src={processImageUrl(source.poster)}
                               alt={source.title}
@@ -881,6 +920,15 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
                       </div>
                     );
                   })}
+                {/* 后台加载提示 */}
+                {backgroundSourcesLoading && (
+                  <div className='flex items-center justify-center py-6 border-t border-gray-300 dark:border-gray-700'>
+                    <div className='animate-spin rounded-full h-6 w-6 border-b-2 border-green-500'></div>
+                    <span className='ml-2 text-sm text-gray-600 dark:text-gray-300'>
+                      正在加载更多播放源...
+                    </span>
+                  </div>
+                )}
                 <div className='flex-shrink-0 mt-auto pt-2 border-t border-gray-400 dark:border-gray-700'>
                   <button
                     onClick={() => {

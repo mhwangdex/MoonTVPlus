@@ -9,6 +9,7 @@ export interface ApiSite {
   api: string;
   name: string;
   detail?: string;
+  proxyMode?: boolean;
 }
 
 export interface LiveCfg {
@@ -522,6 +523,7 @@ export async function getAvailableApiSites(user?: string): Promise<ApiSite[]> {
       name: s.name,
       api: s.api,
       detail: s.detail,
+      proxyMode: s.proxyMode,
     }));
   }
 
@@ -543,6 +545,7 @@ export async function getAvailableApiSites(user?: string): Promise<ApiSite[]> {
         name: s.name,
         api: s.api,
         detail: s.detail,
+        proxyMode: s.proxyMode,
       }));
     }
   }

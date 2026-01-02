@@ -213,6 +213,7 @@ export async function GET(request: NextRequest) {
       sub: oidcSub,
       email: userInfo.email,
       name: userInfo.name,
+      trust_level: userInfo.trust_level, // 提取trust_level字段
       timestamp: Date.now(),
     };
 

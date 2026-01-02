@@ -2,7 +2,7 @@
 
 'use client';
 
-import { ChevronRight } from 'lucide-react';
+import { ChevronRight, Bot, ListVideo } from 'lucide-react';
 import Link from 'next/link';
 import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
 
@@ -10,27 +10,21 @@ import {
   BangumiCalendarData,
   GetBangumiCalendarData,
 } from '@/lib/bangumi.client';
-// 客户端收藏 API
-import {
-  clearAllFavorites,
-  getAllFavorites,
-  getAllPlayRecords,
-  subscribeToDataUpdates,
-} from '@/lib/db.client';
 import { getDoubanCategories } from '@/lib/douban.client';
 import { getTMDBImageUrl, TMDBItem } from '@/lib/tmdb.client';
 import { DoubanItem } from '@/lib/types';
 
-import CapsuleSwitch from '@/components/CapsuleSwitch';
 import ContinueWatching from '@/components/ContinueWatching';
 import PageLayout from '@/components/PageLayout';
 import ScrollableRow from '@/components/ScrollableRow';
 import { useSite } from '@/components/SiteProvider';
 import VideoCard from '@/components/VideoCard';
 import HttpWarningDialog from '@/components/HttpWarningDialog';
+import BannerCarousel from '@/components/BannerCarousel';
+import AIChatPanel from '@/components/AIChatPanel';
 
 function HomeClient() {
-  const [activeTab, setActiveTab] = useState<'home' | 'favorites'>('home');
+  // 移除了 activeTab 状态，收藏夹功能已移到 UserMenu
   const [hotMovies, setHotMovies] = useState<DoubanItem[]>([]);
   const [hotTvShows, setHotTvShows] = useState<DoubanItem[]>([]);
   const [hotVarietyShows, setHotVarietyShows] = useState<DoubanItem[]>([]);
@@ -44,6 +38,27 @@ function HomeClient() {
 
   const [showAnnouncement, setShowAnnouncement] = useState(false);
   const [showHttpWarning, setShowHttpWarning] = useState(true);
+  const [showAIChat, setShowAIChat] = useState(false);
+  const [aiEnabled, setAiEnabled] = useState(false);
+  const [sourceSearchEnabled, setSourceSearchEnabled] = useState(true);
+
+  // 检查AI功能是否启用
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const enabled =
+        (window as any).RUNTIME_CONFIG?.AI_ENABLED &&
+        (window as any).RUNTIME_CONFIG?.AI_ENABLE_HOMEPAGE_ENTRY;
+      setAiEnabled(enabled);
+    }
+  }, []);
+
+  // 检查源站寻片功能是否启用
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const enabled = (window as any).RUNTIME_CONFIG?.ENABLE_SOURCE_SEARCH !== false;
+      setSourceSearchEnabled(enabled);
+    }
+  }, []);
 
   // 检查公告弹窗状态
   useEffect(() => {
@@ -57,163 +72,113 @@ function HomeClient() {
     }
   }, [announcement]);
 
-  // 收藏夹数据
-  type FavoriteItem = {
-    id: string;
-    source: string;
-    title: string;
-    poster: string;
-    episodes: number;
-    source_name: string;
-    currentEpisode?: number;
-    search_title?: string;
-    origin?: 'vod' | 'live';
-  };
-
-  const [favoriteItems, setFavoriteItems] = useState<FavoriteItem[]>([]);
-  const favoritesFetchedRef = useRef(false);
-
   useEffect(() => {
-    const fetchRecommendData = async () => {
-      try {
-        setLoading(true);
+    const CACHE_DURATION = 60 * 60 * 1000; // 1小时
 
-        // 并行获取热门电影、热门剧集、热门综艺、番剧日历和热播短剧
-        const [moviesData, tvShowsData, varietyShowsData, bangumiCalendarData] =
-          await Promise.all([
-            getDoubanCategories({
-              kind: 'movie',
-              category: '热门',
-              type: '全部',
-            }),
+    const getCache = (key: string) => {
+      try {
+        const cached = localStorage.getItem(key);
+        if (!cached) return null;
+        const { data, timestamp } = JSON.parse(cached);
+        return { data, expired: Date.now() - timestamp > CACHE_DURATION };
+      } catch {
+        return null;
+      }
+    };
+
+    const setCache = (key: string, data: any) => {
+      try {
+        localStorage.setItem(key, JSON.stringify({ data, timestamp: Date.now() }));
+      } catch {}
+    };
+
+    const moviesCache = getCache('homepage_movies');
+    const tvShowsCache = getCache('homepage_tvshows');
+    const varietyCache = getCache('homepage_variety');
+    const bangumiCache = getCache('homepage_bangumi');
+    const duanjuCache = getCache('homepage_duanju');
+    const upcomingCache = getCache('homepage_upcoming');
+
+    if (moviesCache?.data) setHotMovies(moviesCache.data);
+    if (tvShowsCache?.data) setHotTvShows(tvShowsCache.data);
+    if (varietyCache?.data) setHotVarietyShows(varietyCache.data);
+    if (bangumiCache?.data) setBangumiCalendarData(bangumiCache.data);
+    if (duanjuCache?.data) setHotDuanju(duanjuCache.data);
+    if (upcomingCache?.data) setUpcomingContent(upcomingCache.data);
+
+    const hasCache = moviesCache || tvShowsCache || varietyCache || bangumiCache || duanjuCache || upcomingCache;
+    if (hasCache) setLoading(false);
+
+    const needsRefresh = !moviesCache || moviesCache.expired || !tvShowsCache || tvShowsCache.expired ||
+                         !varietyCache || varietyCache.expired || !bangumiCache || bangumiCache.expired ||
+                         !duanjuCache || duanjuCache.expired || !upcomingCache || upcomingCache.expired;
+
+    if (needsRefresh) {
+      (async () => {
+        try {
+          const [moviesData, tvShowsData, varietyShowsData, bangumiCalendarData] = await Promise.all([
+            getDoubanCategories({ kind: 'movie', category: '热门', type: '全部' }),
             getDoubanCategories({ kind: 'tv', category: 'tv', type: 'tv' }),
             getDoubanCategories({ kind: 'tv', category: 'show', type: 'show' }),
             GetBangumiCalendarData(),
           ]);
 
-        if (moviesData.code === 200) {
-          setHotMovies(moviesData.list);
-        }
-
-        if (tvShowsData.code === 200) {
-          setHotTvShows(tvShowsData.list);
-        }
-
-        if (varietyShowsData.code === 200) {
-          setHotVarietyShows(varietyShowsData.list);
-        }
-
-        setBangumiCalendarData(bangumiCalendarData);
-
-        // 获取热播短剧
-        try {
-          const duanjuResponse = await fetch('/api/duanju/recommends');
-          if (duanjuResponse.ok) {
-            const duanjuResult = await duanjuResponse.json();
-            if (duanjuResult.code === 200 && duanjuResult.data) {
-              setHotDuanju(duanjuResult.data);
-            }
+          if (moviesData.code === 200) {
+            setHotMovies(moviesData.list);
+            setCache('homepage_movies', moviesData.list);
           }
-        } catch (error) {
-          console.error('获取热播短剧数据失败:', error);
-        }
-
-        // 获取即将上映/播出内容（使用后端API缓存）
-        try {
-          const response = await fetch('/api/tmdb/upcoming');
-          if (response.ok) {
-            const result = await response.json();
-            if (result.code === 200 && result.data) {
-              // 按上映/播出日期升序排序（最近的排在前面）
-              const sortedContent = [...result.data].sort((a, b) => {
-                const dateA = new Date(a.release_date || '9999-12-31').getTime();
-                const dateB = new Date(b.release_date || '9999-12-31').getTime();
-                return dateA - dateB;
-              });
-              setUpcomingContent(sortedContent);
-            }
+          if (tvShowsData.code === 200) {
+            setHotTvShows(tvShowsData.list);
+            setCache('homepage_tvshows', tvShowsData.list);
           }
-        } catch (error) {
-          console.error('获取TMDB即将上映数据失败:', error);
-        }
-      } catch (error) {
-        console.error('获取推荐数据失败:', error);
-      } finally {
-        setLoading(false);
-      }
-    };
+          if (varietyShowsData.code === 200) {
+            setHotVarietyShows(varietyShowsData.list);
+            setCache('homepage_variety', varietyShowsData.list);
+          }
+          setBangumiCalendarData(bangumiCalendarData);
+          setCache('homepage_bangumi', bangumiCalendarData);
 
-    fetchRecommendData();
+          try {
+            const duanjuResponse = await fetch('/api/duanju/recommends');
+            if (duanjuResponse.ok) {
+              const duanjuResult = await duanjuResponse.json();
+              if (duanjuResult.code === 200 && duanjuResult.data) {
+                setHotDuanju(duanjuResult.data);
+                setCache('homepage_duanju', duanjuResult.data);
+              }
+            }
+          } catch (error) {
+            console.error('获取热播短剧数据失败:', error);
+          }
+
+          try {
+            const response = await fetch('/api/tmdb/upcoming');
+            if (response.ok) {
+              const result = await response.json();
+              if (result.code === 200 && result.data) {
+                const sorted = [...result.data].sort((a, b) => {
+                  const dateA = new Date(a.release_date || '9999-12-31').getTime();
+                  const dateB = new Date(b.release_date || '9999-12-31').getTime();
+                  return dateA - dateB;
+                });
+                setUpcomingContent(sorted);
+                setCache('homepage_upcoming', sorted);
+              }
+            }
+          } catch (error) {
+            console.error('获取TMDB即将上映数据失败:', error);
+          }
+
+          setLoading(false);
+        } catch (error) {
+          console.error('获取推荐数据失败:', error);
+          setLoading(false);
+        }
+      })();
+    }
   }, []);
 
-  // 处理收藏数据更新的函数
-  const updateFavoriteItems = useCallback(
-    async (allFavorites: Record<string, any>) => {
-      const allPlayRecords = await getAllPlayRecords();
 
-      // 根据保存时间排序（从近到远）
-      const sorted = Object.entries(allFavorites)
-        .sort(([, a], [, b]) => b.save_time - a.save_time)
-        .map(([key, fav]) => {
-          const plusIndex = key.indexOf('+');
-          const source = key.slice(0, plusIndex);
-          const id = key.slice(plusIndex + 1);
-
-          // 查找对应的播放记录，获取当前集数
-          const playRecord = allPlayRecords[key];
-          const currentEpisode = playRecord?.index;
-
-          return {
-            id,
-            source,
-            title: fav.title,
-            year: fav.year,
-            poster: fav.cover,
-            episodes: fav.total_episodes,
-            source_name: fav.source_name,
-            currentEpisode,
-            search_title: fav?.search_title,
-            origin: fav?.origin,
-          } as FavoriteItem;
-        });
-      setFavoriteItems(sorted);
-    },
-    []
-  );
-
-  // 当切换到收藏夹时加载收藏数据（使用 ref 防止重复加载）
-  useEffect(() => {
-    if (activeTab !== 'favorites') {
-      favoritesFetchedRef.current = false;
-      return;
-    }
-
-    // 已经加载过就不再加载
-    if (favoritesFetchedRef.current) return;
-
-    favoritesFetchedRef.current = true;
-
-    const loadFavorites = async () => {
-      const allFavorites = await getAllFavorites();
-      await updateFavoriteItems(allFavorites);
-    };
-
-    loadFavorites();
-  }, [activeTab, updateFavoriteItems]);
-
-  // 监听收藏更新事件（独立的 useEffect）
-  useEffect(() => {
-    if (activeTab !== 'favorites') return;
-
-    const unsubscribe = subscribeToDataUpdates(
-      'favoritesUpdated',
-      (newFavorites: Record<string, any>) => {
-        updateFavoriteItems(newFavorites);
-      }
-    );
-
-    return unsubscribe;
-  }, [activeTab, updateFavoriteItems]);
 
   const handleCloseAnnouncement = (announcement: string) => {
     setShowAnnouncement(false);
@@ -222,60 +187,41 @@ function HomeClient() {
 
   return (
     <PageLayout>
-      <div className='px-2 sm:px-10 py-4 sm:py-8 overflow-visible'>
-        {/* 顶部 Tab 切换 */}
-        <div className='mb-8 flex justify-center'>
-          <CapsuleSwitch
-            options={[
-              { label: '首页', value: 'home' },
-              { label: '收藏夹', value: 'favorites' },
-            ]}
-            active={activeTab}
-            onChange={(value) => setActiveTab(value as 'home' | 'favorites')}
-          />
-        </div>
+      {/* TMDB 热门轮播图 */}
+      <div className='w-full mb-4'>
+        <BannerCarousel />
+      </div>
 
+      <div className='px-2 sm:px-10 pb-4 sm:pb-8 overflow-visible'>
         <div className='max-w-[95%] mx-auto'>
-          {activeTab === 'favorites' ? (
-            // 收藏夹视图
-            <section className='mb-8'>
-              <div className='mb-4 flex items-center justify-between'>
-                <h2 className='text-xl font-bold text-gray-800 dark:text-gray-200'>
-                  我的收藏
-                </h2>
-                {favoriteItems.length > 0 && (
+          {/* 首页内容 */}
+          <>
+              {/* 源站寻片和AI问片入口 */}
+              <div className='flex items-center justify-end gap-2 mb-4'>
+                {/* 源站寻片入口 */}
+                {sourceSearchEnabled && (
+                  <Link href='/source-search'>
+                    <button
+                      className='p-2 rounded-lg text-blue-500 hover:text-blue-600 transition-colors'
+                      title='源站寻片'
+                    >
+                      <ListVideo size={20} />
+                    </button>
+                  </Link>
+                )}
+
+                {/* AI问片入口 */}
+                {aiEnabled && (
                   <button
-                    className='text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
-                    onClick={async () => {
-                      await clearAllFavorites();
-                      setFavoriteItems([]);
-                    }}
+                    onClick={() => setShowAIChat(true)}
+                    className='p-2 rounded-lg text-purple-500 hover:text-purple-600 transition-colors'
+                    title='AI问片'
                   >
-                    清空
+                    <Bot size={20} />
                   </button>
                 )}
               </div>
-              <div className='justify-start grid grid-cols-3 gap-x-2 gap-y-14 sm:gap-y-20 px-0 sm:px-2 sm:grid-cols-[repeat(auto-fill,_minmax(11rem,_1fr))] sm:gap-x-8'>
-                {favoriteItems.map((item) => (
-                  <div key={item.id + item.source} className='w-full'>
-                    <VideoCard
-                      query={item.search_title}
-                      {...item}
-                      from='favorite'
-                      type={item.episodes > 1 ? 'tv' : ''}
-                    />
-                  </div>
-                ))}
-                {favoriteItems.length === 0 && (
-                  <div className='col-span-full text-center text-gray-500 py-8 dark:text-gray-400'>
-                    暂无收藏内容
-                  </div>
-                )}
-              </div>
-            </section>
-          ) : (
-            // 首页视图
-            <>
+
               {/* 继续观看 */}
               <ContinueWatching />
 
@@ -315,6 +261,7 @@ function HomeClient() {
                             poster={movie.poster}
                             title={movie.title}
                             year={movie.year}
+                            rate={movie.rate}
                             type='movie'
                             from='douban'
                           />
@@ -348,11 +295,21 @@ function HomeClient() {
                             className='min-w-[96px] w-24 sm:min-w-[180px] sm:w-44'
                           >
                             <VideoCard
+                              id={duanju.id}
+                              source={duanju.source}
                               poster={duanju.poster}
                               title={duanju.title}
                               year={duanju.year}
                               type='tv'
-                              from='douban'
+                              from='search'
+                              source_name={duanju.source_name}
+                              episodes={duanju.episodes?.length}
+                              douban_id={duanju.douban_id}
+                              cmsData={{
+                                desc: duanju.desc,
+                                episodes: duanju.episodes,
+                                episodes_titles: duanju.episodes_titles,
+                              }}
                             />
                           </div>
                         ))}
@@ -471,6 +428,7 @@ function HomeClient() {
                             poster={tvShow.poster}
                             title={tvShow.title}
                             year={tvShow.year}
+                            rate={tvShow.rate}
                             type='tv'
                             from='douban'
                           />
@@ -514,6 +472,7 @@ function HomeClient() {
                             poster={varietyShow.poster}
                             title={varietyShow.title}
                             year={varietyShow.year}
+                            rate={varietyShow.rate}
                             type='tv'
                             from='douban'
                           />
@@ -555,14 +514,22 @@ function HomeClient() {
                   </ScrollableRow>
                 </section>
               )}
-            </>
-          )}
+          </>
         </div>
       </div>
 
       {/* HTTP 环境警告弹窗 */}
       {showHttpWarning && (
         <HttpWarningDialog onClose={() => setShowHttpWarning(false)} />
+      )}
+
+      {/* AI问片面板 */}
+      {aiEnabled && (
+        <AIChatPanel
+          isOpen={showAIChat}
+          onClose={() => setShowAIChat(false)}
+          welcomeMessage='你好！我是MoonTVPlus的AI影视助手。想看什么电影或剧集？需要推荐吗？'
+        />
       )}
 
       {/* 公告弹窗 */}

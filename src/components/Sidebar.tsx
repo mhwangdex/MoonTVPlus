@@ -52,7 +52,9 @@ declare global {
   interface Window {
     __sidebarCollapsed?: boolean;
     RUNTIME_CONFIG?: {
-      EnableComments: boolean;
+      EnableComments?: boolean;
+      RecommendationDataSource?: string;
+      [key: string]: any;
     };
   }
 }

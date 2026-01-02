@@ -17,6 +17,7 @@ import {
   clearAllDanmakuCache,
   clearDanmakuCache,
   getDanmakuCacheStats,
+  generateCacheKey,
 } from './cache';
 
 // 初始化弹幕模块（清理过期缓存）
@@ -46,6 +47,8 @@ export {
   clearDanmakuCache,
   clearExpiredDanmakuCache,
   getDanmakuCacheStats,
+  generateCacheKey,
+  getDanmakuFromCache,
 };
 
 // 搜索动漫
@@ -138,18 +141,24 @@ export async function getEpisodes(
 
 // 通过剧集 ID 获取弹幕（优先从缓存读取）
 export async function getDanmakuById(
-  episodeId: number
+  episodeId: number,
+  title?: string,
+  episodeIndex?: number
 ): Promise<DanmakuComment[]> {
   try {
-    // 1. 先尝试从缓存读取
-    const cachedComments = await getDanmakuFromCache(episodeId);
-    if (cachedComments) {
-      console.log(`[弹幕缓存] 使用缓存: episodeId=${episodeId}, 数量=${cachedComments.length}`);
-      return cachedComments;
+    // 1. 如果提供了 title 和 episodeIndex，先尝试从缓存读取
+    if (title && episodeIndex !== undefined) {
+      const cachedComments = await getDanmakuFromCache(title, episodeIndex);
+      if (cachedComments) {
+        console.log(`[弹幕缓存] 使用缓存: title=${title}, episodeIndex=${episodeIndex}, 数量=${cachedComments.length}`);
+        return cachedComments;
+      }
+      console.log(`[弹幕缓存] 缓存未命中，从 API 获取: title=${title}, episodeIndex=${episodeIndex}`);
+    } else {
+      console.log(`[弹幕缓存] 未提供 title/episodeIndex，跳过缓存: episodeId=${episodeId}`);
     }
 
     // 2. 缓存未命中，从 API 获取
-    console.log(`[弹幕缓存] 缓存未命中，从 API 获取: episodeId=${episodeId}`);
     const url = `/api/danmaku/comment?episodeId=${episodeId}`;
     const response = await fetch(url);
 
@@ -160,15 +169,18 @@ export async function getDanmakuById(
     const data = (await response.json()) as DanmakuCommentsResponse;
     const comments = data.comments || [];
 
-    // 3. 保存到缓存
-    if (comments.length > 0) {
+    // 3. 如果提供了 title 和 episodeIndex，保存到缓存
+    if (comments.length > 0 && title && title.trim() !== '' && episodeIndex !== undefined && episodeIndex >= 0) {
       try {
-        await saveDanmakuToCache(episodeId, comments);
-        console.log(`[弹幕缓存] 已缓存: episodeId=${episodeId}, 数量=${comments.length}`);
+        console.log(`[弹幕缓存] 尝试保存缓存: title="${title}", episodeIndex=${episodeIndex}, 数量=${comments.length}`);
+        await saveDanmakuToCache(title, episodeIndex, comments);
+        console.log(`[弹幕缓存] 已缓存: title=${title}, episodeIndex=${episodeIndex}, 数量=${comments.length}`);
       } catch (cacheError) {
         console.error('[弹幕缓存] 保存缓存失败:', cacheError);
         // 缓存失败不影响返回结果
       }
+    } else {
+      console.log(`[弹幕缓存] 不满足缓存条件: title="${title}", episodeIndex=${episodeIndex}, comments.length=${comments.length}`);
     }
 
     return comments;

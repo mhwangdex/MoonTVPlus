@@ -307,12 +307,12 @@ async function handleOpenListProxy(request: NextRequest) {
   if (wd) {
     const results = Object.entries(metaInfo.folders)
       .filter(
-        ([folderName, info]) =>
-          folderName.toLowerCase().includes(wd.toLowerCase()) ||
+        ([key, info]) =>
+          info.folderName.toLowerCase().includes(wd.toLowerCase()) ||
           info.title.toLowerCase().includes(wd.toLowerCase())
       )
-      .map(([folderName, info]) => ({
-        vod_id: folderName,
+      .map(([key, info]) => ({
+        vod_id: key,
         vod_name: info.title,
         vod_pic: getTMDBImageUrl(info.poster_path),
         vod_remarks: info.media_type === 'movie' ? '电影' : '剧集',
@@ -333,8 +333,8 @@ async function handleOpenListProxy(request: NextRequest) {
 
   // 详情模式
   if (ids) {
-    const folderName = ids;
-    const info = metaInfo.folders[folderName];
+    const key = ids;
+    const info = metaInfo.folders[key];
 
     if (!info) {
       return NextResponse.json(
@@ -342,6 +342,8 @@ async function handleOpenListProxy(request: NextRequest) {
         { status: 200 }
       );
     }
+
+    const folderName = info.folderName;
 
     // 获取视频详情
     try {
@@ -376,7 +378,7 @@ async function handleOpenListProxy(request: NextRequest) {
         total: 1,
         list: [
           {
-            vod_id: folderName,
+            vod_id: key,
             vod_name: info.title,
             vod_pic: getTMDBImageUrl(info.poster_path),
             vod_remarks: info.media_type === 'movie' ? '电影' : '剧集',
@@ -399,8 +401,8 @@ async function handleOpenListProxy(request: NextRequest) {
 
   // 默认返回所有视频
   const results = Object.entries(metaInfo.folders).map(
-    ([folderName, info]) => ({
-      vod_id: folderName,
+    ([key, info]) => ({
+      vod_id: key,
       vod_name: info.title,
       vod_pic: getTMDBImageUrl(info.poster_path),
       vod_remarks: info.media_type === 'movie' ? '电影' : '剧集',

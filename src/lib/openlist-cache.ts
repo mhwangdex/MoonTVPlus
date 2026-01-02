@@ -18,7 +18,8 @@ const VIDEOINFO_CACHE: Map<string, VideoInfoCacheEntry> = new Map();
 
 export interface MetaInfo {
   folders: {
-    [folderName: string]: {
+    [key: string]: {
+      folderName: string; // 原始文件夹名称
       tmdb_id: number;
       title: string;
       poster_path: string | null;
@@ -28,6 +29,8 @@ export interface MetaInfo {
       media_type: 'movie' | 'tv';
       last_updated: number;
       failed?: boolean; // 标记是否搜索失败
+      season_number?: number; // 季度编号（仅电视剧）
+      season_name?: string; // 季度名称（仅电视剧）
     };
   };
   last_refresh: number;

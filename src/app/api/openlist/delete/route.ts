@@ -28,10 +28,10 @@ export async function POST(request: NextRequest) {
 
     // 获取请求参数
     const body = await request.json();
-    const { folder } = body;
+    const { key } = body;
 
-    if (!folder) {
-      return NextResponse.json({ error: '缺少 folder 参数' }, { status: 400 });
+    if (!key) {
+      return NextResponse.json({ error: '缺少 key 参数' }, { status: 400 });
     }
 
     // 获取配置
@@ -62,16 +62,16 @@ export async function POST(request: NextRequest) {
 
     const metaInfo: MetaInfo = JSON.parse(metainfoContent);
 
-    // 检查文件夹是否存在
-    if (!metaInfo.folders[folder]) {
+    // 检查 key 是否存在
+    if (!metaInfo.folders[key]) {
       return NextResponse.json(
         { error: '未找到该视频记录' },
         { status: 404 }
       );
     }
 
-    // 删除文件夹记录
-    delete metaInfo.folders[folder];
+    // 删除记录
+    delete metaInfo.folders[key];
 
     // 保存到数据库
     const updatedMetainfoContent = JSON.stringify(metaInfo);

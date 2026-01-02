@@ -165,11 +165,8 @@ export async function POST(req: NextRequest) {
     const userData = importData.data.userData;
     for (const username in userData) {
       const user = userData[username];
-
-      // 重新注册用户（包含密码）- 仅用于旧版用户
-      if (user.password && !importData.data.usersV2?.find((u: any) => u.username === username)) {
-        await db.registerUser(username, user.password);
-      }
+      await db.createUserV2(username, user.password,user.role,user.tags);
+      
 
       // 导入播放记录
       if (user.playRecords) {

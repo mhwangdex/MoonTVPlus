@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any,react-hooks/exhaustive-deps,@typescript-eslint/no-empty-function */
 
-import { ExternalLink, Heart, Link, PlayCircleIcon, Radio, Trash2 } from 'lucide-react';
+import { ExternalLink, Heart, Info, Link, PlayCircleIcon, Radio, Sparkles, Trash2 } from 'lucide-react';
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import React, {
@@ -26,6 +26,8 @@ import { useLongPress } from '@/hooks/useLongPress';
 
 import { ImagePlaceholder } from '@/components/ImagePlaceholder';
 import MobileActionSheet from '@/components/MobileActionSheet';
+import AIChatPanel from '@/components/AIChatPanel';
+import DetailPanel from '@/components/DetailPanel';
 
 export interface VideoCardProps {
   id?: string;
@@ -38,9 +40,10 @@ export interface VideoCardProps {
   source_names?: string[];
   progress?: number;
   year?: string;
-  from: 'playrecord' | 'favorite' | 'search' | 'douban';
+  from: 'playrecord' | 'favorite' | 'search' | 'douban' | 'tmdb' | 'source-search';
   currentEpisode?: number;
   douban_id?: number;
+  tmdb_id?: number;
   onDelete?: () => void;
   rate?: string;
   type?: string;
@@ -49,6 +52,16 @@ export interface VideoCardProps {
   origin?: 'vod' | 'live';
   releaseDate?: string; // 上映日期，格式：YYYY-MM-DD
   isUpcoming?: boolean; // 是否为即将上映
+  seasonNumber?: number; // 季度编号
+  seasonName?: string; // 季度名称
+  orientation?: 'vertical' | 'horizontal'; // 卡片方向
+  playTime?: number; // 当前播放时间（秒）
+  totalTime?: number; // 总时长（秒）
+  cmsData?: {
+    desc?: string;
+    episodes?: string[];
+    episodes_titles?: string[];
+  };
 }
 
 export type VideoCardHandle = {
@@ -72,6 +85,7 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(function VideoCard
     from,
     currentEpisode,
     douban_id,
+    tmdb_id,
     onDelete,
     rate,
     type = '',
@@ -80,6 +94,12 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(function VideoCard
     origin = 'vod',
     releaseDate,
     isUpcoming = false,
+    seasonNumber,
+    seasonName,
+    orientation = 'vertical',
+    playTime,
+    totalTime,
+    cmsData,
   }: VideoCardProps,
   ref
 ) {
@@ -88,6 +108,19 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(function VideoCard
   const [isLoading, setIsLoading] = useState(false);
   const [showMobileActions, setShowMobileActions] = useState(false);
   const [searchFavorited, setSearchFavorited] = useState<boolean | null>(null); // 搜索结果的收藏状态
+  const [showAIChat, setShowAIChat] = useState(false);
+  const [aiEnabled, setAiEnabled] = useState(false);
+  const [showDetailPanel, setShowDetailPanel] = useState(false);
+
+  // 检查AI功能是否启用
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const enabled =
+        (window as any).RUNTIME_CONFIG?.AI_ENABLED &&
+        (window as any).RUNTIME_CONFIG?.AI_ENABLE_VIDEOCARD_ENTRY;
+      setAiEnabled(enabled);
+    }
+  }, []);
 
   // 可外部修改的可控字段
   const [dynamicEpisodes, setDynamicEpisodes] = useState<number | undefined>(
@@ -236,7 +269,7 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(function VideoCard
       // 直播内容跳转到直播页面
       const url = `/live?source=${actualSource.replace('live_', '')}&id=${actualId.replace('live_', '')}`;
       router.push(url);
-    } else if (from === 'douban' || (isAggregate && !actualSource && !actualId)) {
+    } else if (from === 'douban' || from === 'tmdb' || (isAggregate && !actualSource && !actualId)) {
       const url = `/play?title=${encodeURIComponent(actualTitle.trim())}${actualYear ? `&year=${actualYear}` : ''
         }${actualSearchType ? `&stype=${actualSearchType}` : ''}${isAggregate ? '&prefer=true' : ''}${actualQuery ? `&stitle=${encodeURIComponent(actualQuery.trim())}` : ''}`;
       router.push(url);
@@ -273,7 +306,7 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(function VideoCard
       // 直播内容跳转到直播页面
       const url = `/live?source=${actualSource.replace('live_', '')}&id=${actualId.replace('live_', '')}`;
       window.open(url, '_blank');
-    } else if (from === 'douban' || (isAggregate && !actualSource && !actualId)) {
+    } else if (from === 'douban' || from === 'tmdb' || (isAggregate && !actualSource && !actualId)) {
       const url = `/play?title=${encodeURIComponent(actualTitle.trim())}${actualYear ? `&year=${actualYear}` : ''}${actualSearchType ? `&stype=${actualSearchType}` : ''}${isAggregate ? '&prefer=true' : ''}${actualQuery ? `&stitle=${encodeURIComponent(actualQuery.trim())}` : ''}`;
       window.open(url, '_blank');
     } else if (actualSource && actualId) {
@@ -385,7 +418,7 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(function VideoCard
         showHeart: true, // 移动端菜单中需要显示收藏选项
         showCheckCircle: false,
         showDoubanLink: true, // 移动端菜单中显示豆瓣链接
-        showRating: false,
+        showRating: !!rate,
         showYear: true,
       },
       douban: {
@@ -394,9 +427,29 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(function VideoCard
         showPlayButton: !isUpcoming, // 即将上映不显示播放按钮
         showHeart: false,
         showCheckCircle: false,
-        showDoubanLink: true,
+        showDoubanLink: false,
         showRating: !!rate,
         showYear: false,
+      },
+      tmdb: {
+        showSourceName: false,
+        showProgress: false,
+        showPlayButton: !isUpcoming, // 即将上映不显示播放按钮
+        showHeart: false,
+        showCheckCircle: false,
+        showDoubanLink: false,
+        showRating: !!rate,
+        showYear: false,
+      },
+      'source-search': {
+        showSourceName: false,
+        showProgress: false,
+        showPlayButton: true,
+        showHeart: true,
+        showCheckCircle: false,
+        showDoubanLink: true,
+        showRating: !!rate,
+        showYear: true,
       },
     };
     return configs[from] || configs.search;
@@ -429,7 +482,7 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(function VideoCard
     // 聚合源信息 - 直接在菜单中展示，不需要单独的操作项
 
     // 收藏/取消收藏操作
-    if (config.showHeart && from !== 'douban' && actualSource && actualId) {
+    if (config.showHeart && from !== 'douban' && from !== 'tmdb' && actualSource && actualId) {
       const currentFavorited = from === 'search' ? searchFavorited : favorited;
 
       if (from === 'search') {
@@ -518,6 +571,38 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(function VideoCard
       });
     }
 
+    // 详情页面按钮
+    actions.push({
+      id: 'detail',
+      label: '详情',
+      icon: <Info size={20} />,
+      onClick: () => {
+        setShowMobileActions(false);
+        // 延迟打开 DetailPanel，确保 MobileActionSheet 完全清理完成
+        setTimeout(() => {
+          setShowDetailPanel(true);
+        }, 250);
+      },
+      color: 'default' as const,
+    });
+
+    // AI问片功能
+    if (aiEnabled && actualTitle) {
+      actions.push({
+        id: 'ai-chat',
+        label: 'AI问片',
+        icon: <Sparkles size={20} />,
+        onClick: () => {
+          setShowMobileActions(false);
+          // 延迟打开 AIChatPanel，确保 MobileActionSheet 完全清理完成
+          setTimeout(() => {
+            setShowAIChat(true);
+          }, 250);
+        },
+        color: 'default' as const,
+      });
+    }
+
     return actions;
   }, [
     config,
@@ -533,6 +618,9 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(function VideoCard
     handleClick,
     handleToggleFavorite,
     handleDeleteRecord,
+    handlePlayInNewTab,
+    aiEnabled,
+    actualTitle,
   ]);
 
   return (
@@ -580,7 +668,11 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(function VideoCard
       >
         {/* 海报容器 */}
         <div
-          className={`relative aspect-[2/3] overflow-hidden rounded-lg ${origin === 'live' ? 'ring-1 ring-gray-300/80 dark:ring-gray-600/80' : ''}`}
+          className={`relative overflow-hidden rounded-lg ${origin === 'live' ? 'ring-1 ring-gray-300/80 dark:ring-gray-600/80' : ''} ${
+            orientation === 'horizontal'
+              ? 'aspect-[3/2]'
+              : 'aspect-[2/3]'
+          }`}
           style={{
             WebkitUserSelect: 'none',
             userSelect: 'none',
@@ -592,13 +684,13 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(function VideoCard
           }}
         >
           {/* 骨架屏 */}
-          {!isLoading && <ImagePlaceholder aspectRatio='aspect-[2/3]' />}
+          {!isLoading && <ImagePlaceholder aspectRatio={orientation === 'horizontal' ? 'aspect-[3/2]' : 'aspect-[2/3]'} />}
           {/* 图片 */}
           <Image
             src={processImageUrl(actualPoster)}
             alt={actualTitle}
             fill
-            className={origin === 'live' ? 'object-contain' : 'object-cover'}
+            className={origin === 'live' ? 'object-contain' : orientation === 'horizontal' ? 'object-cover object-center' : 'object-cover'}
             referrerPolicy='no-referrer'
             loading='lazy'
             onLoadingComplete={() => setIsLoading(true)}
@@ -704,8 +796,8 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(function VideoCard
             </div>
           )}
 
-          {/* 操作按钮 */}
-          {(config.showHeart || config.showCheckCircle) && (
+          {/* 操作按钮 - 继续观看不显示桌面端悬停按钮 */}
+          {(config.showHeart || config.showCheckCircle) && from !== 'playrecord' && (
             <div
               data-button="true"
               className='absolute bottom-3 right-3 flex gap-3 opacity-0 translate-y-2 transition-all duration-300 ease-in-out sm:group-hover:opacity-100 sm:group-hover:translate-y-0'
@@ -771,7 +863,26 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(function VideoCard
                 return false;
               }}
             >
-              {actualYear}
+              {actualYear.slice(-2)}
+            </div>
+          )}
+
+          {/* 季度徽章 */}
+          {seasonNumber && (
+            <div
+              className="absolute top-2 left-2 bg-blue-500/80 text-white text-xs font-medium px-2 py-1 rounded backdrop-blur-sm shadow-sm transition-all duration-300 ease-out group-hover:opacity-90"
+              style={{
+                WebkitUserSelect: 'none',
+                userSelect: 'none',
+                WebkitTouchCallout: 'none',
+              } as React.CSSProperties}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                return false;
+              }}
+              title={seasonName || `第${seasonNumber}季`}
+            >
+              S{seasonNumber}
             </div>
           )}
 
@@ -793,9 +904,9 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(function VideoCard
             </div>
           )}
 
-          {actualEpisodes && actualEpisodes > 1 && (
+          {actualEpisodes && actualEpisodes > 1 && orientation === 'vertical' && (
             <div
-              className='absolute top-2 right-2 bg-green-500 text-white text-xs font-semibold px-2 py-1 rounded-md shadow-md transition-all duration-300 ease-out group-hover:scale-110'
+              className='absolute top-2 right-2 bg-green-500/70 text-white text-xs font-semibold px-2 py-1 rounded-md shadow-md transition-all duration-300 ease-out group-hover:scale-110'
               style={{
                 WebkitUserSelect: 'none',
                 userSelect: 'none',
@@ -976,112 +1087,13 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(function VideoCard
               </div>
             );
           })()}
-        </div>
 
-        {/* 进度条 */}
-        {config.showProgress && progress !== undefined && (
-          <div
-            className='mt-1 h-1 w-full bg-gray-200 rounded-full overflow-hidden'
-            style={{
-              WebkitUserSelect: 'none',
-              userSelect: 'none',
-              WebkitTouchCallout: 'none',
-            } as React.CSSProperties}
-            onContextMenu={(e) => {
-              e.preventDefault();
-              return false;
-            }}
-          >
-            <div
-              className='h-full bg-green-500 transition-all duration-500 ease-out'
-              style={{
-                width: `${progress}%`,
-                WebkitUserSelect: 'none',
-                userSelect: 'none',
-                WebkitTouchCallout: 'none',
-              } as React.CSSProperties}
-              onContextMenu={(e) => {
-                e.preventDefault();
-                return false;
-              }}
-            />
-          </div>
-        )}
-
-        {/* 标题与来源 */}
-        <div
-          className='mt-2 text-center'
-          style={{
-            WebkitUserSelect: 'none',
-            userSelect: 'none',
-            WebkitTouchCallout: 'none',
-          } as React.CSSProperties}
-          onContextMenu={(e) => {
-            e.preventDefault();
-            return false;
-          }}
-        >
-          <div
-            className='relative'
-            style={{
-              WebkitUserSelect: 'none',
-              userSelect: 'none',
-              WebkitTouchCallout: 'none',
-            } as React.CSSProperties}
-          >
-            <span
-              className='block text-sm font-semibold truncate text-gray-900 dark:text-gray-100 transition-colors duration-300 ease-in-out group-hover:text-green-600 dark:group-hover:text-green-400 peer'
-              style={{
-                WebkitUserSelect: 'none',
-                userSelect: 'none',
-                WebkitTouchCallout: 'none',
-              } as React.CSSProperties}
-              onContextMenu={(e) => {
-                e.preventDefault();
-                return false;
-              }}
-            >
-              {actualTitle}
-            </span>
-            {/* 自定义 tooltip */}
-            <div
-              className='absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-3 py-1 bg-gray-800 text-white text-xs rounded-md shadow-lg opacity-0 invisible peer-hover:opacity-100 peer-hover:visible transition-all duration-200 ease-out delay-100 whitespace-nowrap pointer-events-none'
-              style={{
-                WebkitUserSelect: 'none',
-                userSelect: 'none',
-                WebkitTouchCallout: 'none',
-              } as React.CSSProperties}
-              onContextMenu={(e) => {
-                e.preventDefault();
-                return false;
-              }}
-            >
-              {actualTitle}
+          {/* 横向模式：标题和进度条在海报上 */}
+          {orientation === 'horizontal' && (
+            <>
+              {/* 顶部渐变遮罩 - 用于标题背景 */}
               <div
-                className='absolute top-full left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-gray-800'
-                style={{
-                  WebkitUserSelect: 'none',
-                  userSelect: 'none',
-                  WebkitTouchCallout: 'none',
-                } as React.CSSProperties}
-              ></div>
-            </div>
-          </div>
-          {config.showSourceName && source_name && (
-            <span
-              className='block text-xs text-gray-500 dark:text-gray-400 mt-1'
-              style={{
-                WebkitUserSelect: 'none',
-                userSelect: 'none',
-                WebkitTouchCallout: 'none',
-              } as React.CSSProperties}
-              onContextMenu={(e) => {
-                e.preventDefault();
-                return false;
-              }}
-            >
-              <span
-                className='inline-block border rounded px-2 py-0.5 border-gray-500/60 dark:border-gray-400/60 transition-all duration-300 ease-in-out group-hover:border-green-500/60 group-hover:text-green-600 dark:group-hover:text-green-400'
+                className='absolute top-0 left-0 right-0 bg-gradient-to-b from-black/80 via-black/40 to-transparent pt-2 pb-8 px-2'
                 style={{
                   WebkitUserSelect: 'none',
                   userSelect: 'none',
@@ -1092,14 +1104,307 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(function VideoCard
                   return false;
                 }}
               >
-                {origin === 'live' && (
-                  <Radio size={12} className="inline-block text-gray-500 dark:text-gray-400 mr-1.5" />
+                {/* 标题 */}
+                <div
+                  className='mb-1'
+                  style={{
+                    WebkitUserSelect: 'none',
+                    userSelect: 'none',
+                    WebkitTouchCallout: 'none',
+                  } as React.CSSProperties}
+                >
+                  <span
+                    className='block text-sm font-bold truncate text-white'
+                    style={{
+                      WebkitUserSelect: 'none',
+                      userSelect: 'none',
+                      WebkitTouchCallout: 'none',
+                    } as React.CSSProperties}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      return false;
+                    }}
+                    title={actualTitle}
+                  >
+                    {actualTitle}
+                  </span>
+                </div>
+
+                {/* 集数信息 - 只有超过1集时才显示 */}
+                {currentEpisode && actualEpisodes && actualEpisodes > 1 && (
+                  <div
+                    className='text-xs text-white/90'
+                    style={{
+                      WebkitUserSelect: 'none',
+                      userSelect: 'none',
+                      WebkitTouchCallout: 'none',
+                    } as React.CSSProperties}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      return false;
+                    }}
+                  >
+                    第{currentEpisode}集 · 共{actualEpisodes}集
+                  </div>
                 )}
-                {source_name}
-              </span>
-            </span>
+              </div>
+
+              {/* 底部渐变遮罩 - 用于进度条背景 */}
+              <div
+                className='absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/90 via-black/60 to-transparent pt-8 pb-2 px-2'
+                style={{
+                  WebkitUserSelect: 'none',
+                  userSelect: 'none',
+                  WebkitTouchCallout: 'none',
+                } as React.CSSProperties}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  return false;
+                }}
+              >
+                {/* 进度条 */}
+                {config.showProgress && progress !== undefined && origin !== 'live' && (
+                  <div
+                    style={{
+                      WebkitUserSelect: 'none',
+                      userSelect: 'none',
+                      WebkitTouchCallout: 'none',
+                    } as React.CSSProperties}
+                  >
+                    {/* 来源和时长显示 - 在进度条上方 */}
+                    <div className='flex items-center justify-between mb-1'>
+                      {/* 时长显示 - 左侧 */}
+                      {from === 'playrecord' && playTime !== undefined && totalTime !== undefined && (
+                        <div
+                          className='text-[10px] text-white/80'
+                          style={{
+                            WebkitUserSelect: 'none',
+                            userSelect: 'none',
+                            WebkitTouchCallout: 'none',
+                          } as React.CSSProperties}
+                          onContextMenu={(e) => {
+                            e.preventDefault();
+                            return false;
+                          }}
+                        >
+                          {(() => {
+                            const formatTime = (seconds: number) => {
+                              const mins = Math.floor(seconds / 60);
+                              const secs = Math.floor(seconds % 60);
+                              // 0分钟时不显示分钟
+                              if (mins === 0) {
+                                return `${secs}秒`;
+                              }
+                              return `${mins}分${secs}秒`;
+                            };
+                            return formatTime(playTime);
+                          })()}
+                        </div>
+                      )}
+
+                      {/* 来源 - 右侧 */}
+                      {config.showSourceName && source_name && !cmsData && (
+                        <span
+                          className={`inline-block border rounded px-1 py-0.5 text-[8px] text-white/90 bg-black/30 backdrop-blur-sm ${
+                            actualSource === 'openlist' ? 'border-yellow-500' : 'border-white/60'
+                          }`}
+                          style={{
+                            WebkitUserSelect: 'none',
+                            userSelect: 'none',
+                            WebkitTouchCallout: 'none',
+                          } as React.CSSProperties}
+                          onContextMenu={(e) => {
+                            e.preventDefault();
+                            return false;
+                          }}
+                        >
+                          {source_name}
+                        </span>
+                      )}
+                    </div>
+                    <div
+                      className='h-1 w-full bg-white/20 rounded-full overflow-hidden'
+                      style={{
+                        WebkitUserSelect: 'none',
+                        userSelect: 'none',
+                        WebkitTouchCallout: 'none',
+                      } as React.CSSProperties}
+                      onContextMenu={(e) => {
+                        e.preventDefault();
+                        return false;
+                      }}
+                    >
+                      <div
+                        className='h-full bg-white transition-all duration-500 ease-out'
+                        style={{
+                          width: `${progress}%`,
+                          WebkitUserSelect: 'none',
+                          userSelect: 'none',
+                          WebkitTouchCallout: 'none',
+                        } as React.CSSProperties}
+                        onContextMenu={(e) => {
+                          e.preventDefault();
+                          return false;
+                        }}
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {/* 直播时只显示来源 */}
+                {origin === 'live' && config.showSourceName && source_name && !cmsData && (
+                  <div className='flex items-center justify-end'>
+                    <span
+                      className={`inline-block border rounded px-1 py-0.5 text-[8px] text-white/90 bg-black/30 backdrop-blur-sm ${
+                        origin === 'live' ? 'border-red-500' : actualSource === 'openlist' ? 'border-yellow-500' : 'border-white/60'
+                      }`}
+                      style={{
+                        WebkitUserSelect: 'none',
+                        userSelect: 'none',
+                        WebkitTouchCallout: 'none',
+                      } as React.CSSProperties}
+                      onContextMenu={(e) => {
+                        e.preventDefault();
+                        return false;
+                      }}
+                    >
+                      <Radio size={8} className="inline-block text-white/90 mr-0.5" />
+                      {source_name}
+                    </span>
+                  </div>
+                )}
+              </div>
+            </>
           )}
         </div>
+
+        {/* 竖向模式：进度条和标题在海报下方 */}
+        {orientation === 'vertical' && (
+          <>
+            {/* 进度条 */}
+            {config.showProgress && progress !== undefined && (
+              <div
+                className='mt-1 h-1 w-full bg-gray-200 rounded-full overflow-hidden'
+                style={{
+                  WebkitUserSelect: 'none',
+                  userSelect: 'none',
+                  WebkitTouchCallout: 'none',
+                } as React.CSSProperties}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  return false;
+                }}
+              >
+                <div
+                  className='h-full bg-green-500 transition-all duration-500 ease-out'
+                  style={{
+                    width: `${progress}%`,
+                    WebkitUserSelect: 'none',
+                    userSelect: 'none',
+                    WebkitTouchCallout: 'none',
+                  } as React.CSSProperties}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    return false;
+                  }}
+                />
+              </div>
+            )}
+
+            {/* 标题与来源 */}
+            <div
+              className='mt-2 text-center'
+              style={{
+                WebkitUserSelect: 'none',
+                userSelect: 'none',
+                WebkitTouchCallout: 'none',
+              } as React.CSSProperties}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                return false;
+              }}
+            >
+              <div
+                className='relative'
+                style={{
+                  WebkitUserSelect: 'none',
+                  userSelect: 'none',
+                  WebkitTouchCallout: 'none',
+                } as React.CSSProperties}
+              >
+                <span
+                  className='block text-sm font-semibold truncate text-gray-900 dark:text-gray-100 transition-colors duration-300 ease-in-out group-hover:text-green-600 dark:group-hover:text-green-400 peer'
+                  style={{
+                    WebkitUserSelect: 'none',
+                    userSelect: 'none',
+                    WebkitTouchCallout: 'none',
+                  } as React.CSSProperties}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    return false;
+                  }}
+                >
+                  {actualTitle}
+                </span>
+                {/* 自定义 tooltip */}
+                <div
+                  className='absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-3 py-1 bg-gray-800 text-white text-xs rounded-md shadow-lg opacity-0 invisible peer-hover:opacity-100 peer-hover:visible transition-all duration-200 ease-out delay-100 whitespace-nowrap pointer-events-none'
+                  style={{
+                    WebkitUserSelect: 'none',
+                    userSelect: 'none',
+                    WebkitTouchCallout: 'none',
+                  } as React.CSSProperties}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    return false;
+                  }}
+                >
+                  {actualTitle}
+                  <div
+                    className='absolute top-full left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-gray-800'
+                    style={{
+                      WebkitUserSelect: 'none',
+                      userSelect: 'none',
+                      WebkitTouchCallout: 'none',
+                    } as React.CSSProperties}
+                  ></div>
+                </div>
+              </div>
+              {config.showSourceName && source_name && !cmsData && (
+                <span
+                  className='block text-xs text-gray-500 dark:text-gray-400 mt-1'
+                  style={{
+                    WebkitUserSelect: 'none',
+                    userSelect: 'none',
+                    WebkitTouchCallout: 'none',
+                  } as React.CSSProperties}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    return false;
+                  }}
+                >
+                  <span
+                    className='inline-block border rounded px-2 py-0.5 border-gray-500/60 dark:border-gray-400/60 transition-all duration-300 ease-in-out group-hover:border-green-500/60 group-hover:text-green-600 dark:group-hover:text-green-400'
+                    style={{
+                      WebkitUserSelect: 'none',
+                      userSelect: 'none',
+                      WebkitTouchCallout: 'none',
+                    } as React.CSSProperties}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      return false;
+                    }}
+                  >
+                    {origin === 'live' && (
+                      <Radio size={12} className="inline-block text-gray-500 dark:text-gray-400 mr-1.5" />
+                    )}
+                    {source_name}
+                  </span>
+                </span>
+              )}
+            </div>
+          </>
+        )}
       </div>
 
       {/* 操作菜单 - 支持右键和长按触发 */}
@@ -1111,11 +1416,47 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(function VideoCard
         actions={mobileActions}
         sources={isAggregate && dynamicSourceNames ? Array.from(new Set(dynamicSourceNames)) : undefined}
         isAggregate={isAggregate}
-        sourceName={source_name}
+        sourceName={cmsData ? undefined : source_name}
         currentEpisode={currentEpisode}
         totalEpisodes={actualEpisodes}
         origin={origin}
       />
+
+      {/* AI问片面板 */}
+      {aiEnabled && showAIChat && (
+        <AIChatPanel
+          isOpen={showAIChat}
+          onClose={() => setShowAIChat(false)}
+          context={{
+            title: actualTitle,
+            year: actualYear,
+            douban_id: actualDoubanId,
+            tmdb_id,
+            type: actualSearchType as 'movie' | 'tv',
+            currentEpisode,
+          }}
+          welcomeMessage={`想了解《${actualTitle}》的更多信息吗？我可以帮你查询剧情、演员、评价等。`}
+        />
+      )}
+
+      {/* 详情面板 */}
+      {showDetailPanel && (
+        <DetailPanel
+          isOpen={showDetailPanel}
+          onClose={() => setShowDetailPanel(false)}
+          title={actualTitle}
+          poster={processImageUrl(actualPoster)}
+          doubanId={actualDoubanId}
+          bangumiId={isBangumi ? actualDoubanId : undefined}
+          isBangumi={isBangumi}
+          tmdbId={tmdb_id}
+          type={actualSearchType as 'movie' | 'tv'}
+          seasonNumber={seasonNumber}
+          cmsData={cmsData}
+          sourceId={id}
+          source={source}
+        />
+      )}
     </>
   );
 }

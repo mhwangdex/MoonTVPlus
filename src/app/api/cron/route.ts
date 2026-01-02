@@ -6,6 +6,7 @@ import { getConfig, refineConfig } from '@/lib/config';
 import { db, getStorage } from '@/lib/db';
 import { fetchVideoDetail } from '@/lib/fetchVideoDetail';
 import { refreshLiveChannels } from '@/lib/live';
+import { startOpenListRefresh } from '@/lib/openlist-refresh';
 import { SearchResult } from '@/lib/types';
 
 export const runtime = 'nodejs';
@@ -330,22 +331,11 @@ async function refreshOpenList() {
 
     console.log(`开始 OpenList 定时扫描（间隔: ${scanInterval} 分钟）`);
 
-    // 调用扫描接口（立即扫描模式，不清空 metainfo）
-    const response = await fetch(`${process.env.SITE_BASE || 'http://localhost:3000'}/api/openlist/refresh`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ clearMetaInfo: false }),
-    });
-
-    if (!response.ok) {
-      throw new Error(`扫描请求失败: ${response.status}`);
-    }
-
-    const result = await response.json();
-    console.log('OpenList 定时扫描已启动，任务ID:', result.taskId);
+    // 直接调用扫描函数（立即扫描模式，不清空 metainfo）
+    const { taskId } = await startOpenListRefresh(false);
+    console.log('OpenList 定时扫描已启动，任务ID:', taskId);
   } catch (err) {
     console.error('OpenList 定时扫描失败:', err);
   }
 }
+

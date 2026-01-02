@@ -18,6 +18,9 @@ function ensureStringArray(value: any[]): string[] {
   return value.map((item) => String(item));
 }
 
+// 内存锁：用于防止同一用户的并发播放记录操作（迁移、清理等）
+const playRecordLocks = new Map<string, Promise<void>>();
+
 // 添加Upstash Redis操作重试包装器
 async function withRetry<T>(
   operation: () => Promise<T>,
@@ -62,7 +65,12 @@ export class UpstashRedisStorage implements IStorage {
   }
 
   // ---------- 播放记录 ----------
-  private prKey(user: string, key: string) {
+  private prHashKey(user: string) {
+    return `u:${user}:pr`; // u:username:pr (hash结构)
+  }
+
+  // 旧版播放记录key（用于迁移）
+  private prOldKey(user: string, key: string) {
     return `u:${user}:pr:${key}`; // u:username:pr:source+id
   }
 
@@ -71,7 +79,7 @@ export class UpstashRedisStorage implements IStorage {
     key: string
   ): Promise<PlayRecord | null> {
     const val = await withRetry(() =>
-      this.client.get(this.prKey(userName, key))
+      this.client.hget(this.prHashKey(userName), key)
     );
     return val ? (val as PlayRecord) : null;
   }
@@ -81,40 +89,189 @@ export class UpstashRedisStorage implements IStorage {
     key: string,
     record: PlayRecord
   ): Promise<void> {
-    await withRetry(() => this.client.set(this.prKey(userName, key), record));
+    await withRetry(() => this.client.hset(this.prHashKey(userName), { [key]: record }));
   }
 
   async getAllPlayRecords(
     userName: string
   ): Promise<Record<string, PlayRecord>> {
-    const pattern = `u:${userName}:pr:*`;
-    const keys: string[] = await withRetry(() => this.client.keys(pattern));
-    if (keys.length === 0) return {};
+    const hashData = await withRetry(() =>
+      this.client.hgetall(this.prHashKey(userName))
+    );
+
+    if (!hashData || Object.keys(hashData).length === 0) return {};
 
     const result: Record<string, PlayRecord> = {};
-    for (const fullKey of keys) {
-      const value = await withRetry(() => this.client.get(fullKey));
+    for (const [key, value] of Object.entries(hashData)) {
       if (value) {
-        // 截取 source+id 部分
-        const keyPart = ensureString(fullKey.replace(`u:${userName}:pr:`, ''));
-        result[keyPart] = value as PlayRecord;
+        result[key] = value as PlayRecord;
       }
     }
     return result;
   }
 
   async deletePlayRecord(userName: string, key: string): Promise<void> {
-    await withRetry(() => this.client.del(this.prKey(userName, key)));
+    await withRetry(() => this.client.hdel(this.prHashKey(userName), key));
+  }
+
+  // 清理超出限制的旧播放记录
+  async cleanupOldPlayRecords(userName: string): Promise<void> {
+    // 检查是否已有正在进行的操作
+    const existingLock = playRecordLocks.get(userName);
+    if (existingLock) {
+      console.log(`用户 ${userName} 的播放记录操作正在进行中，跳过清理`);
+      await existingLock;
+      return;
+    }
+
+    // 创建新的操作Promise
+    const cleanupPromise = this.doCleanup(userName);
+    playRecordLocks.set(userName, cleanupPromise);
+
+    try {
+      await cleanupPromise;
+    } finally {
+      // 操作完成后清除锁
+      playRecordLocks.delete(userName);
+    }
+  }
+
+  // 实际执行清理的方法
+  private async doCleanup(userName: string): Promise<void> {
+    try {
+      // 获取配置的最大播放记录数，默认100
+      const maxRecords = parseInt(process.env.MAX_PLAY_RECORDS_PER_USER || '100', 10);
+      const threshold = maxRecords + 10; // 超过最大值+10时才触发清理
+
+      // 获取所有播放记录
+      const allRecords = await this.getAllPlayRecords(userName);
+      const recordCount = Object.keys(allRecords).length;
+
+      // 如果记录数未超过阈值，不需要清理
+      if (recordCount <= threshold) {
+        return;
+      }
+
+      console.log(`用户 ${userName} 的播放记录数 ${recordCount} 超过阈值 ${threshold}，开始清理...`);
+
+      // 将记录转换为数组并按 save_time 排序（从旧到新）
+      const sortedRecords = Object.entries(allRecords).sort(
+        ([, a], [, b]) => a.save_time - b.save_time
+      );
+
+      // 计算需要删除的记录数
+      const deleteCount = recordCount - maxRecords;
+
+      // 删除最旧的记录
+      const recordsToDelete = sortedRecords.slice(0, deleteCount);
+      for (const [key] of recordsToDelete) {
+        await this.deletePlayRecord(userName, key);
+      }
+
+      console.log(`已删除用户 ${userName} 的 ${deleteCount} 条最旧播放记录`);
+    } catch (error) {
+      console.error(`清理用户 ${userName} 播放记录失败:`, error);
+      // 清理失败不影响主流程，只记录错误
+    }
+  }
+
+  // 迁移播放记录：从旧的多key结构迁移到新的hash结构
+  async migratePlayRecords(userName: string): Promise<void> {
+    // 检查是否已有正在进行的迁移
+    const existingMigration = playRecordLocks.get(userName);
+    if (existingMigration) {
+      console.log(`用户 ${userName} 的播放记录正在迁移中，等待完成...`);
+      await existingMigration;
+      return;
+    }
+
+    // 创建新的迁移Promise
+    const migrationPromise = this.doMigration(userName);
+    playRecordLocks.set(userName, migrationPromise);
+
+    try {
+      await migrationPromise;
+    } finally {
+      // 迁移完成后清除锁
+      playRecordLocks.delete(userName);
+    }
+  }
+
+  // 实际执行迁移的方法
+  private async doMigration(userName: string): Promise<void> {
+    console.log(`开始迁移用户 ${userName} 的播放记录...`);
+
+    // 1. 检查是否已经迁移过
+    const userInfo = await this.getUserInfoV2(userName);
+    if (userInfo?.playrecord_migrated) {
+      console.log(`用户 ${userName} 的播放记录已经迁移过，跳过`);
+      return;
+    }
+
+    // 2. 获取旧结构的所有播放记录key
+    const pattern = `u:${userName}:pr:*`;
+    const oldKeys: string[] = await withRetry(() => this.client.keys(pattern));
+
+    if (oldKeys.length === 0) {
+      console.log(`用户 ${userName} 没有旧的播放记录，标记为已迁移`);
+      // 即使没有数据也标记为已迁移
+      await withRetry(() =>
+        this.client.hset(this.userInfoKey(userName), { playrecord_migrated: true })
+      );
+      // 清除用户信息缓存
+      userInfoCache?.delete(userName);
+      return;
+    }
+
+    console.log(`找到 ${oldKeys.length} 条旧播放记录，开始迁移...`);
+
+    // 3. 批量获取旧数据并转换为hash格式
+    const hashData: Record<string, any> = {};
+    for (const fullKey of oldKeys) {
+      const value = await withRetry(() => this.client.get(fullKey));
+      if (value) {
+        // 提取 source+id 部分作为hash的field
+        const keyPart = ensureString(fullKey.replace(`u:${userName}:pr:`, ''));
+        hashData[keyPart] = value;
+      }
+    }
+
+    // 4. 写入新的hash结构
+    if (Object.keys(hashData).length > 0) {
+      await withRetry(() =>
+        this.client.hset(this.prHashKey(userName), hashData)
+      );
+      console.log(`成功迁移 ${Object.keys(hashData).length} 条播放记录到hash结构`);
+    }
+
+    // 5. 删除旧的key
+    await withRetry(() => this.client.del(...oldKeys));
+    console.log(`删除了 ${oldKeys.length} 个旧的播放记录key`);
+
+    // 6. 标记迁移完成
+    await withRetry(() =>
+      this.client.hset(this.userInfoKey(userName), { playrecord_migrated: true })
+    );
+
+    // 7. 清除用户信息缓存，确保下次获取时能读取到最新的迁移标识
+    userInfoCache?.delete(userName);
+
+    console.log(`用户 ${userName} 的播放记录迁移完成`);
   }
 
   // ---------- 收藏 ----------
-  private favKey(user: string, key: string) {
+  private favHashKey(user: string) {
+    return `u:${user}:fav`; // u:username:fav (hash结构)
+  }
+
+  // 旧版收藏key（用于迁移）
+  private favOldKey(user: string, key: string) {
     return `u:${user}:fav:${key}`;
   }
 
   async getFavorite(userName: string, key: string): Promise<Favorite | null> {
     const val = await withRetry(() =>
-      this.client.get(this.favKey(userName, key))
+      this.client.hget(this.favHashKey(userName), key)
     );
     return val ? (val as Favorite) : null;
   }
@@ -124,39 +281,116 @@ export class UpstashRedisStorage implements IStorage {
     key: string,
     favorite: Favorite
   ): Promise<void> {
-    await withRetry(() =>
-      this.client.set(this.favKey(userName, key), favorite)
-    );
+    await withRetry(() => this.client.hset(this.favHashKey(userName), { [key]: favorite }));
   }
 
   async getAllFavorites(userName: string): Promise<Record<string, Favorite>> {
-    const pattern = `u:${userName}:fav:*`;
-    const keys: string[] = await withRetry(() => this.client.keys(pattern));
-    if (keys.length === 0) return {};
+    const hashData = await withRetry(() =>
+      this.client.hgetall(this.favHashKey(userName))
+    );
+
+    if (!hashData || Object.keys(hashData).length === 0) return {};
 
     const result: Record<string, Favorite> = {};
-    for (const fullKey of keys) {
-      const value = await withRetry(() => this.client.get(fullKey));
+    for (const [key, value] of Object.entries(hashData)) {
       if (value) {
-        const keyPart = ensureString(fullKey.replace(`u:${userName}:fav:`, ''));
-        result[keyPart] = value as Favorite;
+        result[key] = value as Favorite;
       }
     }
     return result;
   }
 
   async deleteFavorite(userName: string, key: string): Promise<void> {
-    await withRetry(() => this.client.del(this.favKey(userName, key)));
+    await withRetry(() => this.client.hdel(this.favHashKey(userName), key));
+  }
+
+  // 迁移收藏：从旧的多key结构迁移到新的hash结构
+  async migrateFavorites(userName: string): Promise<void> {
+    // 检查是否已有正在进行的迁移
+    const existingMigration = playRecordLocks.get(userName);
+    if (existingMigration) {
+      console.log(`用户 ${userName} 的收藏正在迁移中，等待完成...`);
+      await existingMigration;
+      return;
+    }
+
+    // 创建新的迁移Promise
+    const migrationPromise = this.doFavoriteMigration(userName);
+    playRecordLocks.set(userName, migrationPromise);
+
+    try {
+      await migrationPromise;
+    } finally {
+      // 迁移完成后清除锁
+      playRecordLocks.delete(userName);
+    }
+  }
+
+  // 实际执行收藏迁移的方法
+  private async doFavoriteMigration(userName: string): Promise<void> {
+    console.log(`开始迁移用户 ${userName} 的收藏...`);
+
+    // 1. 检查是否已经迁移过
+    const userInfo = await this.getUserInfoV2(userName);
+    if (userInfo?.favorite_migrated) {
+      console.log(`用户 ${userName} 的收藏已经迁移过，跳过`);
+      return;
+    }
+
+    // 2. 获取旧结构的所有收藏key
+    const pattern = `u:${userName}:fav:*`;
+    const oldKeys: string[] = await withRetry(() => this.client.keys(pattern));
+
+    if (oldKeys.length === 0) {
+      console.log(`用户 ${userName} 没有旧的收藏，标记为已迁移`);
+      // 即使没有数据也标记为已迁移
+      await withRetry(() =>
+        this.client.hset(this.userInfoKey(userName), { favorite_migrated: true })
+      );
+      // 清除用户信息缓存
+      userInfoCache?.delete(userName);
+      return;
+    }
+
+    console.log(`找到 ${oldKeys.length} 条旧收藏，开始迁移...`);
+
+    // 3. 批量获取旧数据并转换为hash格式
+    const hashData: Record<string, any> = {};
+    for (const fullKey of oldKeys) {
+      const value = await withRetry(() => this.client.get(fullKey));
+      if (value) {
+        // 提取 source+id 部分作为hash的field
+        const keyPart = ensureString(fullKey.replace(`u:${userName}:fav:`, ''));
+        hashData[keyPart] = value;
+      }
+    }
+
+    // 4. 写入新的hash结构
+    if (Object.keys(hashData).length > 0) {
+      await withRetry(() =>
+        this.client.hset(this.favHashKey(userName), hashData)
+      );
+      console.log(`成功迁移 ${Object.keys(hashData).length} 条收藏到hash结构`);
+    }
+
+    // 5. 删除旧的key
+    await withRetry(() => this.client.del(...oldKeys));
+    console.log(`删除了 ${oldKeys.length} 个旧的收藏key`);
+
+    // 6. 标记迁移完成
+    await withRetry(() =>
+      this.client.hset(this.userInfoKey(userName), { favorite_migrated: true })
+    );
+
+    // 7. 清除用户信息缓存，确保下次获取时能读取到最新的迁移标识
+    userInfoCache?.delete(userName);
+
+    console.log(`用户 ${userName} 的收藏迁移完成`);
   }
 
   // ---------- 用户注册 / 登录 ----------
   private userPwdKey(user: string) {
     return `u:${user}:pwd`;
-  }
-
-  async registerUser(userName: string, password: string): Promise<void> {
-    // 简单存储明文密码，生产环境应加密
-    await withRetry(() => this.client.set(this.userPwdKey(userName), password));
   }
 
   async verifyUser(userName: string, password: string): Promise<boolean> {
@@ -193,7 +427,10 @@ export class UpstashRedisStorage implements IStorage {
     // 删除搜索历史
     await withRetry(() => this.client.del(this.shKey(userName)));
 
-    // 删除播放记录
+    // 删除播放记录（新hash结构）
+    await withRetry(() => this.client.del(this.prHashKey(userName)));
+
+    // 删除旧的播放记录key（如果有）
     const playRecordPattern = `u:${userName}:pr:*`;
     const playRecordKeys = await withRetry(() =>
       this.client.keys(playRecordPattern)
@@ -202,7 +439,10 @@ export class UpstashRedisStorage implements IStorage {
       await withRetry(() => this.client.del(...playRecordKeys));
     }
 
-    // 删除收藏夹
+    // 删除收藏夹（新hash结构）
+    await withRetry(() => this.client.del(this.favHashKey(userName)));
+
+    // 删除旧的收藏key（如果有）
     const favoritePattern = `u:${userName}:fav:*`;
     const favoriteKeys = await withRetry(() =>
       this.client.keys(favoritePattern)
@@ -211,7 +451,10 @@ export class UpstashRedisStorage implements IStorage {
       await withRetry(() => this.client.del(...favoriteKeys));
     }
 
-    // 删除跳过片头片尾配置
+    // 删除跳过片头片尾配置（新hash结构）
+    await withRetry(() => this.client.del(this.skipHashKey(userName)));
+
+    // 删除旧的跳过配置key（如果有）
     const skipConfigPattern = `u:${userName}:skip:*`;
     const skipConfigKeys = await withRetry(() =>
       this.client.keys(skipConfigPattern)
@@ -322,6 +565,9 @@ export class UpstashRedisStorage implements IStorage {
     oidcSub?: string;
     enabledApis?: string[];
     created_at: number;
+    playrecord_migrated?: boolean;
+    favorite_migrated?: boolean;
+    skip_migrated?: boolean;
   } | null> {
     // 先从缓存获取
     const cached = userInfoCache?.get(userName);
@@ -343,6 +589,36 @@ export class UpstashRedisStorage implements IStorage {
       banned = userInfo.banned;
     } else if (typeof userInfo.banned === 'string') {
       banned = userInfo.banned === 'true';
+    }
+
+    // 处理 playrecord_migrated 字段
+    let playrecord_migrated: boolean | undefined = undefined;
+    if (userInfo.playrecord_migrated !== undefined) {
+      if (typeof userInfo.playrecord_migrated === 'boolean') {
+        playrecord_migrated = userInfo.playrecord_migrated;
+      } else if (typeof userInfo.playrecord_migrated === 'string') {
+        playrecord_migrated = userInfo.playrecord_migrated === 'true';
+      }
+    }
+
+    // 处理 favorite_migrated 字段
+    let favorite_migrated: boolean | undefined = undefined;
+    if (userInfo.favorite_migrated !== undefined) {
+      if (typeof userInfo.favorite_migrated === 'boolean') {
+        favorite_migrated = userInfo.favorite_migrated;
+      } else if (typeof userInfo.favorite_migrated === 'string') {
+        favorite_migrated = userInfo.favorite_migrated === 'true';
+      }
+    }
+
+    // 处理 skip_migrated 字段
+    let skip_migrated: boolean | undefined = undefined;
+    if (userInfo.skip_migrated !== undefined) {
+      if (typeof userInfo.skip_migrated === 'boolean') {
+        skip_migrated = userInfo.skip_migrated;
+      } else if (typeof userInfo.skip_migrated === 'string') {
+        skip_migrated = userInfo.skip_migrated === 'true';
+      }
     }
 
     // 安全解析 tags 字段
@@ -382,6 +658,9 @@ export class UpstashRedisStorage implements IStorage {
       oidcSub: userInfo.oidcSub as string | undefined,
       enabledApis,
       created_at: parseInt((userInfo.created_at as string) || '0', 10),
+      playrecord_migrated,
+      favorite_migrated,
+      skip_migrated,
     };
 
     // 存入缓存
@@ -704,8 +983,8 @@ export class UpstashRedisStorage implements IStorage {
   }
 
   // ---------- 跳过片头片尾配置 ----------
-  private skipConfigKey(user: string, source: string, id: string) {
-    return `u:${user}:skip:${source}+${id}`;
+  private skipHashKey(user: string) {
+    return `u:${user}:skip`; // u:username:skip (hash结构)
   }
 
   private danmakuFilterConfigKey(user: string) {
@@ -717,8 +996,9 @@ export class UpstashRedisStorage implements IStorage {
     source: string,
     id: string
   ): Promise<SkipConfig | null> {
+    const key = `${source}+${id}`;
     const val = await withRetry(() =>
-      this.client.get(this.skipConfigKey(userName, source, id))
+      this.client.hget(this.skipHashKey(userName), key)
     );
     return val ? (val as SkipConfig) : null;
   }
@@ -729,8 +1009,9 @@ export class UpstashRedisStorage implements IStorage {
     id: string,
     config: SkipConfig
   ): Promise<void> {
+    const key = `${source}+${id}`;
     await withRetry(() =>
-      this.client.set(this.skipConfigKey(userName, source, id), config)
+      this.client.hset(this.skipHashKey(userName), { [key]: config })
     );
   }
 
@@ -739,39 +1020,92 @@ export class UpstashRedisStorage implements IStorage {
     source: string,
     id: string
   ): Promise<void> {
+    const key = `${source}+${id}`;
     await withRetry(() =>
-      this.client.del(this.skipConfigKey(userName, source, id))
+      this.client.hdel(this.skipHashKey(userName), key)
     );
   }
 
   async getAllSkipConfigs(
     userName: string
   ): Promise<{ [key: string]: SkipConfig }> {
-    const pattern = `u:${userName}:skip:*`;
-    const keys = await withRetry(() => this.client.keys(pattern));
+    const hashData = await withRetry(() =>
+      this.client.hgetall<Record<string, SkipConfig>>(this.skipHashKey(userName))
+    );
 
-    if (keys.length === 0) {
-      return {};
+    return hashData || {};
+  }
+
+  // 迁移跳过配置：从旧的多key结构迁移到新的hash结构
+  async migrateSkipConfigs(userName: string): Promise<void> {
+    const existingMigration = playRecordLocks.get(`${userName}:skip`);
+    if (existingMigration) {
+      console.log(`用户 ${userName} 的跳过配置正在迁移中，等待完成...`);
+      await existingMigration;
+      return;
     }
 
-    const configs: { [key: string]: SkipConfig } = {};
+    const migrationPromise = this.doSkipConfigMigration(userName);
+    playRecordLocks.set(`${userName}:skip`, migrationPromise);
 
-    // 批量获取所有配置
-    const values = await withRetry(() => this.client.mget(keys));
+    try {
+      await migrationPromise;
+    } finally {
+      playRecordLocks.delete(`${userName}:skip`);
+    }
+  }
 
-    keys.forEach((key, index) => {
+  private async doSkipConfigMigration(userName: string): Promise<void> {
+    console.log(`开始迁移用户 ${userName} 的跳过配置...`);
+
+    const userInfo = await this.getUserInfoV2(userName);
+    if (userInfo?.skip_migrated) {
+      console.log(`用户 ${userName} 的跳过配置已经迁移过，跳过`);
+      return;
+    }
+
+    const pattern = `u:${userName}:skip:*`;
+    const oldKeys: string[] = await withRetry(() => this.client.keys(pattern));
+
+    if (oldKeys.length === 0) {
+      console.log(`用户 ${userName} 没有旧的跳过配置，标记为已迁移`);
+      await withRetry(() =>
+        this.client.hset(this.userInfoKey(userName), { skip_migrated: 'true' })
+      );
+      userInfoCache?.delete(userName);
+      return;
+    }
+
+    const values = await withRetry(() => this.client.mget(oldKeys));
+
+    const hashData: Record<string, SkipConfig> = {};
+    oldKeys.forEach((key, index) => {
       const value = values[index];
       if (value) {
-        // 从key中提取source+id
         const match = key.match(/^u:.+?:skip:(.+)$/);
         if (match) {
           const sourceAndId = match[1];
-          configs[sourceAndId] = value as SkipConfig;
+          hashData[sourceAndId] = value as SkipConfig;
         }
       }
     });
 
-    return configs;
+    if (Object.keys(hashData).length > 0) {
+      await withRetry(() =>
+        this.client.hset(this.skipHashKey(userName), hashData)
+      );
+      console.log(`成功迁移 ${Object.keys(hashData).length} 条跳过配置到hash结构`);
+    }
+
+    await withRetry(() => this.client.del(...oldKeys));
+    console.log(`删除了 ${oldKeys.length} 个旧的跳过配置key`);
+
+    await withRetry(() =>
+      this.client.hset(this.userInfoKey(userName), { skip_migrated: 'true' })
+    );
+    userInfoCache?.delete(userName);
+
+    console.log(`用户 ${userName} 的跳过配置迁移完成`);
   }
 
   // ---------- 弹幕过滤配置 ----------

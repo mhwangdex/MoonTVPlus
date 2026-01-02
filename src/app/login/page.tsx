@@ -81,15 +81,41 @@ function LoginPageClient() {
   const [turnstileLoaded, setTurnstileLoaded] = useState(false);
   const [siteConfig, setSiteConfig] = useState<any>(null);
   const [turnstileWidgetId, setTurnstileWidgetId] = useState<string | null>(null);
+  const [backgroundImage, setBackgroundImage] = useState<string>('');
 
   const { siteName } = useSite();
 
   // 在客户端挂载后设置配置
   useEffect(() => {
     if (typeof window !== 'undefined') {
-      const storageType = (window as any).RUNTIME_CONFIG?.STORAGE_TYPE;
+      const runtimeConfig = (window as any).RUNTIME_CONFIG;
+      const storageType = runtimeConfig?.STORAGE_TYPE;
       const shouldAsk = storageType && storageType !== 'localstorage';
       setShouldAskUsername(shouldAsk);
+
+      // 设置背景图（支持多张随机选择）
+      const loginBg = runtimeConfig?.LOGIN_BACKGROUND_IMAGE;
+      if (loginBg) {
+        const urls = loginBg
+          .split('\n')
+          .map((url: string) => url.trim())
+          .filter((url: string) => url !== '');
+
+        if (urls.length > 0) {
+          // 随机选择一张背景图
+          const randomIndex = Math.floor(Math.random() * urls.length);
+          setBackgroundImage(urls[randomIndex]);
+        }
+      }
+
+      // 设置站点配置
+      setSiteConfig({
+        LoginRequireTurnstile: runtimeConfig?.LOGIN_REQUIRE_TURNSTILE || false,
+        TurnstileSiteKey: runtimeConfig?.TURNSTILE_SITE_KEY || '',
+        EnableRegistration: runtimeConfig?.ENABLE_REGISTRATION || false,
+        EnableOIDCLogin: runtimeConfig?.ENABLE_OIDC_LOGIN || false,
+        OIDCButtonText: runtimeConfig?.OIDC_BUTTON_TEXT || '',
+      });
 
       // 从localStorage读取记住的密码信息
       const rememberedCredentials = localStorage.getItem('rememberedCredentials');
@@ -109,23 +135,6 @@ function LoginPageClient() {
         }
       }
     }
-  }, []);
-
-  // 获取站点配置
-  useEffect(() => {
-    const fetchConfig = async () => {
-      try {
-        const res = await fetch('/api/server-config');
-        if (res.ok) {
-          const config = await res.json();
-          setSiteConfig(config);
-        }
-      } catch (error) {
-        console.error('Failed to fetch config:', error);
-      }
-    };
-
-    fetchConfig();
   }, []);
 
   // 加载Cloudflare Turnstile脚本
@@ -235,7 +244,15 @@ function LoginPageClient() {
 
 
   return (
-    <div className='relative min-h-screen flex items-center justify-center px-4 overflow-hidden'>
+    <div
+      className='relative min-h-screen flex items-center justify-center px-4 overflow-hidden'
+      style={backgroundImage ? {
+        backgroundImage: `url(${backgroundImage})`,
+        backgroundSize: 'cover',
+        backgroundPosition: 'center',
+        backgroundRepeat: 'no-repeat'
+      } : undefined}
+    >
       <div className='absolute top-4 right-4'>
         <ThemeToggle />
       </div>

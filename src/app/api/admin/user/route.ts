@@ -165,9 +165,6 @@ export async function POST(request: NextRequest) {
         // 使用新版本创建用户
         await db.createUserV2(targetUsername!, targetPassword, 'user', tags);
 
-        // 同时在旧版本存储中创建（保持兼容性）
-        await db.registerUser(targetUsername!, targetPassword);
-
         // 不再更新配置，因为用户已经存储在新版本中
         // 构造一个虚拟的targetEntry用于后续逻辑
         targetEntry = {
@@ -298,8 +295,6 @@ export async function POST(request: NextRequest) {
 
         // 使用新版本修改密码（SHA256加密）
         await db.changePasswordV2(targetUsername!, targetPassword);
-        // 同时更新旧版本（保持兼容性）
-        await db.changePassword(targetUsername!, targetPassword);
         break;
       }
       case 'deleteUser': {
@@ -327,8 +322,6 @@ export async function POST(request: NextRequest) {
 
         // 只删除V2存储中的用户
         await db.deleteUserV2(targetUsername!);
-        // 同时删除旧版本（保持兼容性）
-        await db.deleteUser(targetUsername!);
 
         break;
       }

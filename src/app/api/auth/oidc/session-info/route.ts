@@ -35,6 +35,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({
       email: oidcSession.email,
       name: oidcSession.name,
+      trust_level: oidcSession.trust_level,
     });
   } catch (error) {
     return NextResponse.json(

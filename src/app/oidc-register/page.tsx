@@ -103,6 +103,12 @@ function OIDCRegisterPageClient() {
               {oidcInfo.name && (
                 <>
                   名称: <strong>{oidcInfo.name}</strong>
+                  <br />
+                </>
+              )}
+              {oidcInfo.trust_level !== undefined && (
+                <>
+                  信任等级: <strong>{oidcInfo.trust_level}</strong>
                 </>
               )}
             </p>

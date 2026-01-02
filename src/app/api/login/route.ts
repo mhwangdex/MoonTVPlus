@@ -231,19 +231,6 @@ export async function POST(req: NextRequest) {
       pass = await db.verifyUserV2(username, password);
       userRole = userInfoV2.role;
       isBanned = userInfoV2.banned;
-    } else {
-      // 回退到旧版本验证
-      try {
-        pass = await db.verifyUser(username, password);
-        // 从配置中获取角色和封禁状态
-        if (user) {
-          userRole = user.role;
-          isBanned = user.banned || false;
-        }
-      } catch (err) {
-        console.error('数据库验证失败', err);
-        return NextResponse.json({ error: '数据库错误' }, { status: 500 });
-      }
     }
 
     // 检查用户是否被封禁

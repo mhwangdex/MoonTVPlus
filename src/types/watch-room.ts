@@ -129,7 +129,7 @@ export interface WatchRoomConfig {
   enabled: boolean;
   serverType: 'internal' | 'external';
   externalServerUrl?: string;
-  externalServerAuth?: string;
+  externalServerAuth?: string; // 通过 /api/watch-room-auth 接口获取（需要登录）
 }
 
 // LocalStorage 存储的房间信息

@@ -3,15 +3,23 @@
 import type { DanmakuComment } from './types';
 
 // IndexedDB 数据库名称和版本
-const DB_NAME = 'moontvplus_danmaku_cache';
+const DB_NAME = 'moontvplus_danmaku_cache_v2';
 const DB_VERSION = 1;
 const STORE_NAME = 'danmaku';
 
 // 缓存数据结构
 export interface DanmakuCacheData {
-  episodeId: number;
+  cacheKey: string; // title + episodeIndex 组合键
   comments: DanmakuComment[];
   timestamp: number; // 缓存时间戳
+  title?: string; // 可选：视频标题
+  episodeIndex?: number; // 可选：集数索引
+}
+
+// 生成缓存键（title + episodeIndex）
+export function generateCacheKey(title: string, episodeIndex: number): string {
+  // 使用 | 分隔符连接 title 和 episodeIndex
+  return `${title}|${episodeIndex}`;
 }
 
 // 获取弹幕缓存失效时间（毫秒）
@@ -53,7 +61,7 @@ async function openDB(): Promise<IDBDatabase> {
 
       // 创建对象存储（如果不存在）
       if (!db.objectStoreNames.contains(STORE_NAME)) {
-        const objectStore = db.createObjectStore(STORE_NAME, { keyPath: 'episodeId' });
+        const objectStore = db.createObjectStore(STORE_NAME, { keyPath: 'cacheKey' });
         objectStore.createIndex('timestamp', 'timestamp', { unique: false });
         console.log('IndexedDB 对象存储已创建:', STORE_NAME);
       }
@@ -63,9 +71,20 @@ async function openDB(): Promise<IDBDatabase> {
 
 // 保存弹幕到缓存
 export async function saveDanmakuToCache(
-  episodeId: number,
+  title: string,
+  episodeIndex: number,
   comments: DanmakuComment[]
 ): Promise<void> {
+  // 验证参数
+  if (!title || title.trim() === '') {
+    console.warn('弹幕缓存: title 为空，跳过保存');
+    return;
+  }
+  if (episodeIndex === undefined || episodeIndex === null || episodeIndex < 0) {
+    console.warn('弹幕缓存: episodeIndex 无效，跳过保存');
+    return;
+  }
+
   // 如果缓存时间设置为 0，不保存缓存
   const expireTime = getDanmakuCacheExpireTime();
   if (expireTime === 0) {
@@ -78,21 +97,33 @@ export async function saveDanmakuToCache(
     const transaction = db.transaction([STORE_NAME], 'readwrite');
     const objectStore = transaction.objectStore(STORE_NAME);
 
+    const cacheKey = generateCacheKey(title, episodeIndex);
     const cacheData: DanmakuCacheData = {
-      episodeId,
+      cacheKey,
       comments,
       timestamp: Date.now(),
+      title,
+      episodeIndex,
     };
+
+    // 添加调试日志
+    console.log(`[弹幕缓存] 准备保存: cacheKey="${cacheKey}", title="${title}", episodeIndex=${episodeIndex}`);
 
     return new Promise((resolve, reject) => {
       const request = objectStore.put(cacheData);
 
       request.onsuccess = () => {
-        console.log(`弹幕已缓存: episodeId=${episodeId}, 数量=${comments.length}`);
+        console.log(`弹幕已缓存: title=${title}, episodeIndex=${episodeIndex}, 数量=${comments.length}`);
         resolve();
       };
 
-      request.onerror = () => {
+      request.onerror = (event) => {
+        console.error('保存弹幕缓存失败，详细信息:', {
+          error: (event.target as IDBRequest).error,
+          cacheKey,
+          title,
+          episodeIndex,
+        });
         reject(new Error('保存弹幕缓存失败'));
       };
 
@@ -108,7 +139,8 @@ export async function saveDanmakuToCache(
 
 // 从缓存获取弹幕
 export async function getDanmakuFromCache(
-  episodeId: number
+  title: string,
+  episodeIndex: number
 ): Promise<DanmakuComment[] | null> {
   // 如果缓存时间设置为 0，不使用缓存
   const expireTime = getDanmakuCacheExpireTime();
@@ -122,14 +154,16 @@ export async function getDanmakuFromCache(
     const transaction = db.transaction([STORE_NAME], 'readonly');
     const objectStore = transaction.objectStore(STORE_NAME);
 
+    const cacheKey = generateCacheKey(title, episodeIndex);
+
     return new Promise((resolve, reject) => {
-      const request = objectStore.get(episodeId);
+      const request = objectStore.get(cacheKey);
 
       request.onsuccess = () => {
         const result = request.result as DanmakuCacheData | undefined;
 
         if (!result) {
-          console.log(`弹幕缓存未找到: episodeId=${episodeId}`);
+          console.log(`弹幕缓存未找到: title=${title}, episodeIndex=${episodeIndex}`);
           resolve(null);
           return;
         }
@@ -142,7 +176,7 @@ export async function getDanmakuFromCache(
         if (age > expireTime) {
           const ageMinutes = Math.floor(age / 1000 / 60);
           console.log(
-            `弹幕缓存已过期: episodeId=${episodeId}, 年龄=${ageMinutes}分钟`
+            `弹幕缓存已过期: title=${title}, episodeIndex=${episodeIndex}, 年龄=${ageMinutes}分钟`
           );
           resolve(null);
           return;
@@ -150,7 +184,7 @@ export async function getDanmakuFromCache(
 
         const ageMinutes = Math.floor(age / 1000 / 60);
         console.log(
-          `从缓存获取弹幕: episodeId=${episodeId}, 数量=${result.comments.length}, 年龄=${ageMinutes}分钟`
+          `从缓存获取弹幕: title=${title}, episodeIndex=${episodeIndex}, 数量=${result.comments.length}, 年龄=${ageMinutes}分钟`
         );
         resolve(result.comments);
       };
@@ -170,17 +204,19 @@ export async function getDanmakuFromCache(
 }
 
 // 清除指定弹幕缓存
-export async function clearDanmakuCache(episodeId: number): Promise<void> {
+export async function clearDanmakuCache(title: string, episodeIndex: number): Promise<void> {
   try {
     const db = await openDB();
     const transaction = db.transaction([STORE_NAME], 'readwrite');
     const objectStore = transaction.objectStore(STORE_NAME);
 
+    const cacheKey = generateCacheKey(title, episodeIndex);
+
     return new Promise((resolve, reject) => {
-      const request = objectStore.delete(episodeId);
+      const request = objectStore.delete(cacheKey);
 
       request.onsuccess = () => {
-        console.log(`弹幕缓存已清除: episodeId=${episodeId}`);
+        console.log(`弹幕缓存已清除: title=${title}, episodeIndex=${episodeIndex}`);
         resolve();
       };
 

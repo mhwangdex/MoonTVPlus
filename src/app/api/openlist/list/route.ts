@@ -125,19 +125,23 @@ export async function GET(request: NextRequest) {
     const allVideos = Object.entries(metaInfo.folders)
       .filter(([, info]) => includeFailed || !info.failed) // 根据参数过滤失败的视频
       .map(
-        ([folderName, info]) => ({
-          id: folderName,
-          folder: folderName,
-          tmdbId: info.tmdb_id,
-          title: info.title,
-          poster: getTMDBImageUrl(info.poster_path),
-          releaseDate: info.release_date,
-          overview: info.overview,
-          voteAverage: info.vote_average,
-          mediaType: info.media_type,
-          lastUpdated: info.last_updated,
-          failed: info.failed || false,
-        })
+        ([key, info]) => {
+          return {
+            id: key,
+            folder: info.folderName,
+            tmdbId: info.tmdb_id,
+            title: info.title,
+            poster: getTMDBImageUrl(info.poster_path),
+            releaseDate: info.release_date,
+            overview: info.overview,
+            voteAverage: info.vote_average,
+            mediaType: info.media_type,
+            lastUpdated: info.last_updated,
+            failed: info.failed || false,
+            seasonNumber: info.season_number,
+            seasonName: info.season_name,
+          };
+        }
       );
 
     // 按更新时间倒序排序

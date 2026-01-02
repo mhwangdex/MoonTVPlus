@@ -58,8 +58,8 @@ export default function PansouSearch({
   const [selectedType, setSelectedType] = useState<string>('all'); // 'all' 表示显示全部
 
   useEffect(() => {
-    // 只在 triggerSearch 变化时执行搜索，不响应 keyword 变化
-    if (!triggerSearch) {
+    // triggerSearch 变化时触发搜索（无论是 true 还是 false）
+    if (triggerSearch === undefined) {
       return;
     }
 

@@ -81,29 +81,43 @@ function RegisterPageClient() {
   const [turnstileLoaded, setTurnstileLoaded] = useState(false);
   const [siteConfig, setSiteConfig] = useState<any>(null);
   const [turnstileWidgetId, setTurnstileWidgetId] = useState<string | null>(null);
+  const [backgroundImage, setBackgroundImage] = useState<string>('');
 
   const { siteName } = useSite();
 
-  // 获取站点配置
+  // 在客户端挂载后设置配置
   useEffect(() => {
-    const fetchConfig = async () => {
-      try {
-        const res = await fetch('/api/server-config');
-        if (res.ok) {
-          const config = await res.json();
-          setSiteConfig(config);
+    if (typeof window !== 'undefined') {
+      const runtimeConfig = (window as any).RUNTIME_CONFIG;
 
-          // 如果未开启注册，重定向到登录页
-          if (!config.EnableRegistration) {
-            router.replace('/login');
-          }
+      // 设置背景图（支持多张随机选择）
+      const registerBg = runtimeConfig?.REGISTER_BACKGROUND_IMAGE;
+      if (registerBg) {
+        const urls = registerBg
+          .split('\n')
+          .map((url: string) => url.trim())
+          .filter((url: string) => url !== '');
+
+        if (urls.length > 0) {
+          // 随机选择一张背景图
+          const randomIndex = Math.floor(Math.random() * urls.length);
+          setBackgroundImage(urls[randomIndex]);
         }
-      } catch (error) {
-        console.error('Failed to fetch config:', error);
       }
-    };
 
-    fetchConfig();
+      // 设置站点配置
+      const config = {
+        EnableRegistration: runtimeConfig?.ENABLE_REGISTRATION || false,
+        RegistrationRequireTurnstile: runtimeConfig?.REGISTRATION_REQUIRE_TURNSTILE || false,
+        TurnstileSiteKey: runtimeConfig?.TURNSTILE_SITE_KEY || '',
+      };
+      setSiteConfig(config);
+
+      // 如果未开启注册，重定向到登录页
+      if (!config.EnableRegistration) {
+        router.replace('/login');
+      }
+    }
   }, [router]);
 
   // 加载Cloudflare Turnstile脚本
@@ -224,7 +238,15 @@ function RegisterPageClient() {
   }
 
   return (
-    <div className='relative min-h-screen flex items-center justify-center px-4 overflow-hidden'>
+    <div
+      className='relative min-h-screen flex items-center justify-center px-4 overflow-hidden'
+      style={backgroundImage ? {
+        backgroundImage: `url(${backgroundImage})`,
+        backgroundSize: 'cover',
+        backgroundPosition: 'center',
+        backgroundRepeat: 'no-repeat'
+      } : undefined}
+    >
       <div className='absolute top-4 right-4'>
         <ThemeToggle />
       </div>

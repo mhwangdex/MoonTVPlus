@@ -45,12 +45,10 @@ export async function POST(request: NextRequest) {
     // 获取配置与存储
     const adminConfig = await getConfig();
 
-    // 权限与身份校验
+    // 权限与身份校验 - 使用v2用户系统
     if (username !== process.env.USERNAME) {
-      const userEntry = adminConfig.UserConfig.Users.find(
-        (u) => u.username === username
-      );
-      if (!userEntry || userEntry.role !== 'admin' || userEntry.banned) {
+      const userInfo = await db.getUserInfoV2(username);
+      if (!userInfo || userInfo.role !== 'admin' || userInfo.banned) {
         return NextResponse.json({ error: '权限不足' }, { status: 401 });
       }
     }

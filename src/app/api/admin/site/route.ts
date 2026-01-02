@@ -43,6 +43,7 @@ export async function POST(request: NextRequest) {
       DanmakuApiToken,
       TMDBApiKey,
       TMDBProxy,
+      BannerDataSource,
       PansouApiUrl,
       PansouUsername,
       PansouPassword,
@@ -64,6 +65,7 @@ export async function POST(request: NextRequest) {
       OIDCClientId,
       OIDCClientSecret,
       OIDCButtonText,
+      OIDCMinTrustLevel,
     } = body as {
       SiteName: string;
       Announcement: string;
@@ -79,6 +81,7 @@ export async function POST(request: NextRequest) {
       DanmakuApiToken: string;
       TMDBApiKey?: string;
       TMDBProxy?: string;
+      BannerDataSource?: string;
       PansouApiUrl?: string;
       PansouUsername?: string;
       PansouPassword?: string;
@@ -100,6 +103,7 @@ export async function POST(request: NextRequest) {
       OIDCClientId?: string;
       OIDCClientSecret?: string;
       OIDCButtonText?: string;
+      OIDCMinTrustLevel?: number;
     };
 
     // 参数校验
@@ -118,6 +122,7 @@ export async function POST(request: NextRequest) {
       typeof DanmakuApiToken !== 'string' ||
       (TMDBApiKey !== undefined && typeof TMDBApiKey !== 'string') ||
       (TMDBProxy !== undefined && typeof TMDBProxy !== 'string') ||
+      (BannerDataSource !== undefined && typeof BannerDataSource !== 'string') ||
       typeof EnableComments !== 'boolean' ||
       (CustomAdFilterCode !== undefined && typeof CustomAdFilterCode !== 'string') ||
       (CustomAdFilterVersion !== undefined && typeof CustomAdFilterVersion !== 'number') ||
@@ -135,20 +140,18 @@ export async function POST(request: NextRequest) {
       (OIDCUserInfoEndpoint !== undefined && typeof OIDCUserInfoEndpoint !== 'string') ||
       (OIDCClientId !== undefined && typeof OIDCClientId !== 'string') ||
       (OIDCClientSecret !== undefined && typeof OIDCClientSecret !== 'string') ||
-      (OIDCButtonText !== undefined && typeof OIDCButtonText !== 'string')
+      (OIDCButtonText !== undefined && typeof OIDCButtonText !== 'string') ||
+      (OIDCMinTrustLevel !== undefined && typeof OIDCMinTrustLevel !== 'number')
     ) {
       return NextResponse.json({ error: '参数格式错误' }, { status: 400 });
     }
 
     const adminConfig = await getConfig();
 
-    // 权限校验
+    // 权限校验 - 使用v2用户系统
     if (username !== process.env.USERNAME) {
-      // 管理员
-      const user = adminConfig.UserConfig.Users.find(
-        (u) => u.username === username
-      );
-      if (!user || user.role !== 'admin' || user.banned) {
+      const userInfo = await db.getUserInfoV2(username);
+      if (!userInfo || userInfo.role !== 'admin' || userInfo.banned) {
         return NextResponse.json({ error: '权限不足' }, { status: 401 });
       }
     }
@@ -169,6 +172,7 @@ export async function POST(request: NextRequest) {
       DanmakuApiToken,
       TMDBApiKey,
       TMDBProxy,
+      BannerDataSource,
       PansouApiUrl,
       PansouUsername,
       PansouPassword,
@@ -190,6 +194,7 @@ export async function POST(request: NextRequest) {
       OIDCClientId,
       OIDCClientSecret,
       OIDCButtonText,
+      OIDCMinTrustLevel,
     };
 
     // 写入数据库

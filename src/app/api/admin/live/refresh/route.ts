@@ -11,16 +11,13 @@ export const runtime = 'nodejs';
 
 export async function POST(request: NextRequest) {
   try {
-    // 权限检查
+    // 权限检查 - 使用v2用户系统
     const authInfo = getAuthInfoFromCookie(request);
     const username = authInfo?.username;
     const config = await getConfig();
     if (username !== process.env.USERNAME) {
-      // 管理员
-      const user = config.UserConfig.Users.find(
-        (u) => u.username === username
-      );
-      if (!user || user.role !== 'admin' || user.banned) {
+      const userInfo = await db.getUserInfoV2(username || '');
+      if (!userInfo || userInfo.role !== 'admin' || userInfo.banned) {
         return NextResponse.json({ error: '权限不足' }, { status: 401 });
       }
     }

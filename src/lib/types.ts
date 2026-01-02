@@ -39,15 +39,20 @@ export interface IStorage {
   ): Promise<void>;
   getAllPlayRecords(userName: string): Promise<{ [key: string]: PlayRecord }>;
   deletePlayRecord(userName: string, key: string): Promise<void>;
+  // 清理超出限制的旧播放记录
+  cleanupOldPlayRecords(userName: string): Promise<void>;
+  // 迁移播放记录
+  migratePlayRecords(userName: string): Promise<void>;
 
   // 收藏相关
   getFavorite(userName: string, key: string): Promise<Favorite | null>;
   setFavorite(userName: string, key: string, favorite: Favorite): Promise<void>;
   getAllFavorites(userName: string): Promise<{ [key: string]: Favorite }>;
   deleteFavorite(userName: string, key: string): Promise<void>;
+  // 迁移收藏
+  migrateFavorites(userName: string): Promise<void>;
 
   // 用户相关
-  registerUser(userName: string, password: string): Promise<void>;
   verifyUser(userName: string, password: string): Promise<boolean>;
   // 检查用户是否存在（无需密码）
   checkUserExist(userName: string): Promise<boolean>;
@@ -82,6 +87,8 @@ export interface IStorage {
   ): Promise<void>;
   deleteSkipConfig(userName: string, source: string, id: string): Promise<void>;
   getAllSkipConfigs(userName: string): Promise<{ [key: string]: SkipConfig }>;
+  // 迁移跳过配置
+  migrateSkipConfigs(userName: string): Promise<void>;
 
   // 弹幕过滤配置相关
   getDanmakuFilterConfig(userName: string): Promise<DanmakuFilterConfig | null>;
@@ -128,6 +135,7 @@ export interface SearchResult {
   douban_id?: number;
   vod_remarks?: string; // 视频备注信息（如"全80集"、"更新至25集"等）
   vod_total?: number; // 总集数
+  proxyMode?: boolean; // 代理模式：启用后由服务器代理m3u8和ts分片
 }
 
 // 豆瓣数据结构

@@ -26,7 +26,7 @@ export async function POST(request: NextRequest) {
 
   try {
     const body = await request.json();
-    const { action, Enabled, URL, Username, Password, RootPath, ScanInterval } = body;
+    const { action, Enabled, URL, Username, Password, RootPath, OfflineDownloadPath, ScanInterval } = body;
 
     const authInfo = getAuthInfoFromCookie(request);
     if (!authInfo || !authInfo.username) {
@@ -37,12 +37,10 @@ export async function POST(request: NextRequest) {
     // 获取配置
     const adminConfig = await getConfig();
 
-    // 权限检查
+    // 权限检查 - 使用v2用户系统
     if (username !== process.env.USERNAME) {
-      const userEntry = adminConfig.UserConfig.Users.find(
-        (u) => u.username === username
-      );
-      if (!userEntry || userEntry.role !== 'admin' || userEntry.banned) {
+      const userInfo = await db.getUserInfoV2(username);
+      if (!userInfo || userInfo.role !== 'admin' || userInfo.banned) {
         return NextResponse.json({ error: '权限不足' }, { status: 401 });
       }
     }
@@ -56,6 +54,7 @@ export async function POST(request: NextRequest) {
           Username: Username || '',
           Password: Password || '',
           RootPath: RootPath || '/',
+          OfflineDownloadPath: OfflineDownloadPath || '/',
           LastRefreshTime: adminConfig.OpenListConfig?.LastRefreshTime,
           ResourceCount: adminConfig.OpenListConfig?.ResourceCount,
           ScanInterval: 0,
@@ -105,6 +104,7 @@ export async function POST(request: NextRequest) {
         Username,
         Password,
         RootPath: RootPath || '/',
+        OfflineDownloadPath: OfflineDownloadPath || '/',
         LastRefreshTime: adminConfig.OpenListConfig?.LastRefreshTime,
         ResourceCount: adminConfig.OpenListConfig?.ResourceCount,
         ScanInterval: scanInterval,

@@ -37,10 +37,10 @@ export async function GET(request: NextRequest) {
       }
 
       const rootPath = openListConfig.RootPath || '/';
-      const folderPath = `${rootPath}${rootPath.endsWith('/') ? '' : '/'}${id}`;
 
       // 1. 读取 metainfo 获取元数据
       let metaInfo: any = null;
+      let folderMeta: any = null;
       try {
         const { getCachedMetaInfo, setCachedMetaInfo } = await import('@/lib/openlist-cache');
         const { db } = await import('@/lib/db');
@@ -54,9 +54,19 @@ export async function GET(request: NextRequest) {
             setCachedMetaInfo(rootPath, metaInfo);
           }
         }
+
+        // 使用 key 查找文件夹信息
+        folderMeta = metaInfo?.folders?.[id];
+        if (!folderMeta) {
+          throw new Error('未找到该视频信息');
+        }
       } catch (error) {
-        // 忽略错误
+        throw new Error('读取视频信息失败: ' + (error as Error).message);
       }
+
+      // 使用 folderName 构建实际路径
+      const folderName = folderMeta.folderName;
+      const folderPath = `${rootPath}${rootPath.endsWith('/') ? '' : '/'}${folderName}`;
 
       // 2. 直接调用 OpenList 客户端获取视频列表
       const { OpenListClient } = await import('@/lib/openlist.client');
@@ -70,24 +80,6 @@ export async function GET(request: NextRequest) {
       );
 
       let videoInfo = getCachedVideoInfo(folderPath);
-
-      if (!videoInfo) {
-        try {
-          const videoinfoPath = `${folderPath}/videoinfo.json`;
-          const fileResponse = await client.getFile(videoinfoPath);
-
-          if (fileResponse.code === 200 && fileResponse.data.raw_url) {
-            const contentResponse = await fetch(fileResponse.data.raw_url);
-            const content = await contentResponse.text();
-            videoInfo = JSON.parse(content);
-            if (videoInfo) {
-              setCachedVideoInfo(folderPath, videoInfo);
-            }
-          }
-        } catch (error) {
-          // 忽略错误
-        }
-      }
 
       const listResponse = await client.listDirectory(folderPath);
 
@@ -138,20 +130,20 @@ export async function GET(request: NextRequest) {
         .sort((a, b) => a.episode !== b.episode ? a.episode - b.episode : a.fileName.localeCompare(b.fileName));
 
       // 3. 从 metainfo 中获取元数据
-      const folderMeta = metaInfo?.folders?.[id];
       const { getTMDBImageUrl } = await import('@/lib/tmdb.search');
 
       const result = {
         source: 'openlist',
         source_name: '私人影库',
         id: id,
-        title: folderMeta?.title || id,
+        title: folderMeta?.title || folderName,
         poster: folderMeta?.poster_path ? getTMDBImageUrl(folderMeta.poster_path) : '',
         year: folderMeta?.release_date ? folderMeta.release_date.split('-')[0] : '',
         douban_id: 0,
         desc: folderMeta?.overview || '',
-        episodes: episodes.map((ep) => `/api/openlist/play?folder=${encodeURIComponent(id)}&fileName=${encodeURIComponent(ep.fileName)}`),
+        episodes: episodes.map((ep) => `/api/openlist/play?folder=${encodeURIComponent(folderName)}&fileName=${encodeURIComponent(ep.fileName)}`),
         episodes_titles: episodes.map((ep) => ep.title),
+        proxyMode: false, // openlist 源不使用代理模式
       };
 
       return NextResponse.json(result);
@@ -176,9 +168,16 @@ export async function GET(request: NextRequest) {
     }
 
     const result = await getDetailFromApi(apiSite, id);
+
+    // 添加 proxyMode 到返回结果
+    const resultWithProxy = {
+      ...result,
+      proxyMode: apiSite.proxyMode || false,
+    };
+
     const cacheTime = await getCacheTime();
 
-    return NextResponse.json(result, {
+    return NextResponse.json(resultWithProxy, {
       headers: {
         'Cache-Control': `public, max-age=${cacheTime}, s-maxage=${cacheTime}`,
         'CDN-Cache-Control': `public, s-maxage=${cacheTime}`,

@@ -27,11 +27,24 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { folder, tmdbId, title, posterPath, releaseDate, overview, voteAverage, mediaType } = body;
+    const {
+      key,
+      tmdbId,
+      doubanId,
+      title,
+      posterPath,
+      releaseDate,
+      overview,
+      voteAverage,
+      mediaType,
+      seasonNumber,
+      seasonName,
+    } = body;
 
-    if (!folder || !tmdbId) {
+    // 只验证 key 和 title 是必需的
+    if (!key || !title) {
       return NextResponse.json(
-        { error: '缺少必要参数' },
+        { error: '缺少必要参数 (key 或 title)' },
         { status: 400 }
       );
     }
@@ -86,9 +99,21 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // 检查 key 是否存在
+    if (!metaInfo.folders[key]) {
+      return NextResponse.json(
+        { error: '视频不存在' },
+        { status: 404 }
+      );
+    }
+
+    // 保留原始文件夹名称
+    const folderName = metaInfo.folders[key].folderName;
+
     // 更新视频信息
-    metaInfo.folders[folder] = {
-      tmdb_id: tmdbId,
+    metaInfo.folders[key] = {
+      folderName: folderName,
+      tmdb_id: tmdbId || null,
       title: title,
       poster_path: posterPath,
       release_date: releaseDate || '',
@@ -97,6 +122,8 @@ export async function POST(request: NextRequest) {
       media_type: mediaType,
       last_updated: Date.now(),
       failed: false, // 纠错后标记为成功
+      season_number: seasonNumber, // 季度编号(可选)
+      season_name: seasonName, // 季度名称(可选)
     };
 
     // 保存 metainfo 到数据库
