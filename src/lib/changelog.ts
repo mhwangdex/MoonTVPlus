@@ -10,7 +10,29 @@ export interface ChangelogEntry {
 }
 
 export const changelog: ChangelogEntry[] = [
-  {
+	{
+    version: '205.1.0',
+    date: '2026-01-02',
+	added: [
+		"播放器显示截屏按钮",
+		"播放器在移动端增加快进快退控件",
+		"私人影库增加扫描模式",
+		"定时任务接口增加鉴权",
+		"tmdb轮播图支持预告片显示"
+    ],
+    changed: [
+		"调整竖向videocard样式",
+		"源站寻片应用黄色过滤器",
+		"调整播放页大屏幕下封面图大小",
+		"热力图不再使用artplayer内置方式，改为自定义实现"
+    ],
+    fixed: [
+		"修复私人影库分页问题",
+		"修复同一视频频繁弹窗弹幕选择",
+		"彻底移除旧版用户导入导出并修复导入密码二次hash的问题"
+	]
+	},
+	{
     version: '205.0.1',
     date: '2026-01-01',
 	added: [

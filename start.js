@@ -58,8 +58,9 @@ const intervalId = setInterval(() => {
 
 // 执行 cron 任务的函数
 function executeCronJob() {
+  const cronPassword = process.env.CRON_PASSWORD || 'mtvpls';
   const cronUrl = `http://${process.env.HOSTNAME || 'localhost'}:${process.env.PORT || 3000
-    }/api/cron`;
+    }/api/cron/${cronPassword}`;
 
   console.log(`Executing cron job: ${cronUrl}`);
 

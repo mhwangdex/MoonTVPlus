@@ -23,6 +23,8 @@ export default function BannerCarousel({ autoPlayInterval = 5000 }: BannerCarous
   const [isLoading, setIsLoading] = useState(true);
   const [isPaused, setIsPaused] = useState(false);
   const [skipNextAutoPlay, setSkipNextAutoPlay] = useState(false); // 跳过下一次自动播放
+  const [isYouTubeAccessible, setIsYouTubeAccessible] = useState(false); // YouTube连通性（默认false，检查后再决定）
+  const [enableTrailers, setEnableTrailers] = useState(false); // 是否启用预告片（默认关闭）
   const touchStartX = useRef(0);
   const touchEndX = useRef(0);
   const isManualChange = useRef(false); // 标记是否为手动切换
@@ -50,6 +52,39 @@ export default function BannerCarousel({ autoPlayInterval = 5000 }: BannerCarous
     // 否则使用TMDB的URL拼接
     return getTMDBImageUrl(path, 'original');
   };
+
+  // 读取本地设置
+  useEffect(() => {
+    const setting = localStorage.getItem('enableTrailers');
+    if (setting !== null) {
+      setEnableTrailers(setting === 'true');
+    }
+  }, []);
+
+  // 检测YouTube连通性
+  useEffect(() => {
+    const checkYouTubeAccess = () => {
+      const img = document.createElement('img');
+      const timeout = setTimeout(() => {
+        img.src = '';
+        setIsYouTubeAccessible(false);
+      }, 3000);
+
+      img.onload = () => {
+        clearTimeout(timeout);
+        setIsYouTubeAccessible(true);
+      };
+
+      img.onerror = () => {
+        clearTimeout(timeout);
+        setIsYouTubeAccessible(false);
+      };
+
+      img.src = 'https://i.ytimg.com/vi/dQw4w9WgXcQ/default.jpg';
+    };
+
+    checkYouTubeAccess();
+  }, []);
 
   // 获取热门内容
   useEffect(() => {
@@ -234,7 +269,7 @@ export default function BannerCarousel({ autoPlayInterval = 5000 }: BannerCarous
         }
       }}
     >
-      {/* 背景图片 */}
+      {/* 背景图片或视频 */}
       <div className="absolute inset-0">
         {items.map((item, index) => (
           <div
@@ -243,14 +278,34 @@ export default function BannerCarousel({ autoPlayInterval = 5000 }: BannerCarous
               index === currentIndex ? 'opacity-100' : 'opacity-0'
             }`}
           >
-            <Image
-              src={getImageUrl(item.backdrop_path || item.poster_path)}
-              alt={item.title}
-              fill
-              className="object-cover"
-              priority={index === 0}
-              sizes="100vw"
-            />
+            {item.video_key && isYouTubeAccessible && enableTrailers ? (
+              /* 显示YouTube视频 */
+              <div className="absolute inset-0 overflow-hidden">
+                <iframe
+                  src={`https://www.youtube.com/embed/${item.video_key}?listType=playlist&autoplay=1&mute=1&controls=0&loop=1&playlist=${item.video_key}&modestbranding=1&rel=0&showinfo=0&vq=hd1080&hd=1&disablekb=1&fs=0&iv_load_policy=3`}
+                  className="absolute top-1/2 left-1/2 pointer-events-none"
+                  allow="autoplay; encrypted-media"
+                  style={{
+                    border: 'none',
+                    width: '100vw',
+                    height: '100vh',
+                    minWidth: '100%',
+                    minHeight: '100%',
+                    transform: 'translate(-50%, -50%)',
+                  }}
+                />
+              </div>
+            ) : (
+              /* 显示图片 */
+              <Image
+                src={getImageUrl(item.backdrop_path || item.poster_path)}
+                alt={item.title}
+                fill
+                className="object-cover"
+                priority={index === 0}
+                sizes="100vw"
+              />
+            )}
             {/* 渐变遮罩 */}
             <div className="absolute inset-0 bg-gradient-to-r from-black/80 via-black/50 to-transparent"></div>
             <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent"></div>

@@ -80,6 +80,13 @@ export async function POST(req: NextRequest) {
     // 开始导入数据 - 先清空现有数据
     await db.clearAllData();
 
+    // 额外清除所有V2用户（clearAllData可能只清除旧版用户）
+    const existingUsers = await db.getUserListV2(0, 1000000, process.env.USERNAME);
+    for (const user of existingUsers.users) {
+      await db.deleteUserV2(user.username);
+    }
+    console.log(`已清除 ${existingUsers.users.length} 个现有V2用户`);
+
     // 导入管理员配置
     importData.data.adminConfig = configSelfCheck(importData.data.adminConfig);
     await db.saveAdminConfig(importData.data.adminConfig);
@@ -94,79 +101,73 @@ export async function POST(req: NextRequest) {
       // 不影响主流程，继续执行
     }
 
-    // 导入V2用户信息
-    if (importData.data.usersV2 && Array.isArray(importData.data.usersV2)) {
-      for (const userV2 of importData.data.usersV2) {
-        try {
-          // 跳过环境变量中的站长（站长使用环境变量认证）
-          if (userV2.username === process.env.USERNAME) {
-            console.log(`跳过站长 ${userV2.username} 的导入`);
-            continue;
-          }
-
-          // 获取用户的加密密码
-          const userData = importData.data.userData[userV2.username];
-          const passwordV2 = userData?.passwordV2;
-
-          if (passwordV2) {
-            // 将站长角色转换为普通角色
-            const importedRole = userV2.role === 'owner' ? 'user' : userV2.role;
-            if (userV2.role === 'owner') {
-              console.log(`用户 ${userV2.username} 的角色从 owner 转换为 user`);
-            }
-
-            // 直接使用加密后的密码创建用户
-            const storage = (db as any).storage;
-            if (storage && typeof storage.client?.hset === 'function') {
-              const userInfoKey = `user:${userV2.username}:info`;
-              const createdAt = userV2.created_at || Date.now();
-
-              const userInfo: any = {
-                role: importedRole,
-                banned: userV2.banned,
-                password: passwordV2,
-                created_at: createdAt.toString(),
-              };
-
-              if (userV2.tags && userV2.tags.length > 0) {
-                userInfo.tags = JSON.stringify(userV2.tags);
-              }
-
-              if (userV2.oidcSub) {
-                userInfo.oidcSub = userV2.oidcSub;
-                // 创建OIDC映射
-                const oidcSubKey = `oidc:sub:${userV2.oidcSub}`;
-                await storage.client.set(oidcSubKey, userV2.username);
-              }
-
-              if (userV2.enabledApis && userV2.enabledApis.length > 0) {
-                userInfo.enabledApis = JSON.stringify(userV2.enabledApis);
-              }
-
-              await storage.client.hset(userInfoKey, userInfo);
-
-              // 添加到用户列表（Sorted Set）
-              const userListKey = 'user:list';
-              await storage.client.zadd(userListKey, {
-                score: createdAt,
-                member: userV2.username,
-              });
-
-              console.log(`V2用户 ${userV2.username} 导入成功`);
-            }
-          }
-        } catch (error) {
-          console.error(`导入V2用户 ${userV2.username} 失败:`, error);
-        }
-      }
-    }
-
-    // 导入用户数据
+    // 导入用户数据和user:info
     const userData = importData.data.userData;
+    const storage = (db as any).storage;
+    const usersV2Map = new Map((importData.data.usersV2 || []).map((u: any) => [u.username, u]));
+
+    const userCount = Object.keys(userData).length;
+    console.log(`准备导入 ${userCount} 个用户的数据`);
+
+    let importedCount = 0;
     for (const username in userData) {
       const user = userData[username];
-      await db.createUserV2(username, user.password,user.role,user.tags);
-      
+
+      // 为所有有passwordV2的用户创建user:info
+      if (user.passwordV2) {
+        const userV2 = usersV2Map.get(username) as any;
+
+        // 确定角色：站长为owner，其他用户从usersV2获取或默认为user
+        let role: 'owner' | 'admin' | 'user' = 'user';
+        if (username === process.env.USERNAME) {
+          role = 'owner';
+        } else if (userV2) {
+          role = userV2.role === 'owner' ? 'user' : userV2.role;
+        }
+
+        const createdAt = userV2?.created_at || Date.now();
+
+        // 直接设置用户信息（不经过createUserV2，避免密码被再次hash）
+        const userInfoKey = `user:${username}:info`;
+        const userInfo: Record<string, string> = {
+          role,
+          banned: String(userV2?.banned || false),
+          password: user.passwordV2, // 已经是hash过的密码，直接使用
+          created_at: createdAt.toString(),
+        };
+
+        if (userV2?.tags && userV2.tags.length > 0) {
+          userInfo.tags = JSON.stringify(userV2.tags);
+        }
+
+        if (userV2?.oidcSub) {
+          userInfo.oidcSub = userV2.oidcSub;
+        }
+
+        if (userV2?.enabledApis && userV2.enabledApis.length > 0) {
+          userInfo.enabledApis = JSON.stringify(userV2.enabledApis);
+        }
+
+        // 使用storage.withRetry直接设置用户信息
+        await storage.withRetry(() => storage.client.hSet(userInfoKey, userInfo));
+
+        // 添加到用户列表
+        await storage.withRetry(() => storage.client.zAdd('user:list', {
+          score: createdAt,
+          value: username,
+        }));
+
+        // 如果有oidcSub，创建映射
+        if (userV2?.oidcSub) {
+          const oidcSubKey = `oidc:sub:${userV2.oidcSub}`;
+          await storage.withRetry(() => storage.client.set(oidcSubKey, username));
+        }
+
+        importedCount++;
+        console.log(`用户 ${username} 导入成功`);
+      } else {
+        console.log(`跳过用户 ${username}：没有passwordV2`);
+      }
 
       // 导入播放记录
       if (user.playRecords) {
@@ -199,6 +200,8 @@ export async function POST(req: NextRequest) {
         }
       }
     }
+
+    console.log(`成功导入 ${importedCount} 个用户的user:info`);
 
     return NextResponse.json({
       message: '数据导入成功',

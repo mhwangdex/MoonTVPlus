@@ -88,14 +88,31 @@ export async function GET(request: NextRequest) {
 
       let videoInfo = getCachedVideoInfo(folderPath);
 
-      const listResponse = await client.listDirectory(folderPath);
+      // 获取所有分页的视频文件
+      const allFiles: any[] = [];
+      let currentPage = 1;
+      const pageSize = 100;
+      let total = 0;
 
-      if (listResponse.code !== 200) {
-        throw new Error('OpenList 列表获取失败');
+      while (true) {
+        const listResponse = await client.listDirectory(folderPath, currentPage, pageSize);
+
+        if (listResponse.code !== 200) {
+          throw new Error('OpenList 列表获取失败');
+        }
+
+        total = listResponse.data.total;
+        allFiles.push(...listResponse.data.content);
+
+        if (allFiles.length >= total) {
+          break;
+        }
+
+        currentPage++;
       }
 
       const videoExtensions = ['.mp4', '.mkv', '.avi', '.m3u8', '.flv', '.ts', '.mov', '.wmv', '.webm', '.rmvb', '.rm', '.mpg', '.mpeg', '.3gp', '.f4v', '.m4v', '.vob'];
-      const videoFiles = listResponse.data.content.filter((item) => {
+      const videoFiles = allFiles.filter((item) => {
         if (item.is_dir || item.name.startsWith('.') || item.name.endsWith('.json')) return false;
         return videoExtensions.some(ext => item.name.toLowerCase().endsWith(ext));
       });

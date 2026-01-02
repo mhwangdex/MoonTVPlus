@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { getAuthInfoFromCookie } from '@/lib/auth';
-import { API_CONFIG, getAvailableApiSites } from '@/lib/config';
+import { API_CONFIG, getAvailableApiSites, getConfig } from '@/lib/config';
+import { yellowWords } from '@/lib/yellow';
 
 export const runtime = 'nodejs';
 
@@ -32,6 +33,7 @@ export async function GET(request: NextRequest) {
   }
 
   try {
+    const config = await getConfig();
     const apiSites = await getAvailableApiSites(authInfo.username);
     const targetSite = apiSites.find((site) => site.key === sourceKey);
 
@@ -61,8 +63,17 @@ export async function GET(request: NextRequest) {
       });
     }
 
+    // 应用黄色过滤器规则
+    let filteredCategories = classData.class;
+    if (!config.SiteConfig.DisableYellowFilter) {
+      filteredCategories = classData.class.filter((item) => {
+        const typeName = item.type_name || '';
+        return !yellowWords.some((word: string) => typeName.includes(word));
+      });
+    }
+
     return NextResponse.json({
-      categories: classData.class.map((item) => ({
+      categories: filteredCategories.map((item) => ({
         id: item.type_id.toString(),
         name: item.type_name,
       })),

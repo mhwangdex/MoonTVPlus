@@ -54,6 +54,7 @@ export interface TMDBItem {
   vote_average: number;
   media_type: 'movie' | 'tv';
   genre_ids?: number[]; // 类型ID列表
+  video_key?: string; // YouTube视频key
 }
 
 interface TMDBUpcomingResponse {
@@ -252,6 +253,60 @@ export async function getTMDBUpcomingContent(
   } catch (error) {
     console.error('获取 TMDB 即将上映内容失败:', error);
     return { code: 500, list: [] };
+  }
+}
+
+/**
+ * 获取视频（预告片）
+ * @param apiKey - TMDB API Key
+ * @param mediaType - 媒体类型 (movie 或 tv)
+ * @param mediaId - 媒体ID
+ * @param proxy - 代理服务器地址
+ * @returns YouTube视频key（只返回预告片）
+ */
+export async function getTMDBVideos(
+  apiKey: string,
+  mediaType: 'movie' | 'tv',
+  mediaId: number,
+  proxy?: string
+): Promise<string | null> {
+  try {
+    const actualKey = getNextApiKey(apiKey);
+    if (!actualKey) {
+      return null;
+    }
+
+    const url = `https://api.themoviedb.org/3/${mediaType}/${mediaId}/videos?api_key=${actualKey}`;
+    const fetchOptions: any = proxy
+      ? {
+          agent: new HttpsProxyAgent(proxy, {
+            timeout: 30000,
+            keepAlive: false,
+          }),
+          signal: AbortSignal.timeout(30000),
+        }
+      : {
+          signal: AbortSignal.timeout(15000),
+        };
+
+    const response = await nodeFetch(url, fetchOptions);
+
+    if (!response.ok) {
+      return null;
+    }
+
+    const data: any = await response.json();
+    const videos = data.results || [];
+
+    // 只查找YouTube预告片
+    const trailer = videos.find((v: any) =>
+      v.site === 'YouTube' && v.type === 'Trailer'
+    );
+
+    return trailer?.key || null;
+  } catch (error) {
+    console.error('获取 TMDB 视频失败:', error);
+    return null;
   }
 }
 

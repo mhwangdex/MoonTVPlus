@@ -51,7 +51,7 @@ export default function DanmakuPanel({
       } else {
         setSearchResults([]);
         setSearchError(
-          response.errorMessage || '未找到匹配的动漫，请尝试其他关键词'
+          response.errorMessage || '未找到匹配的剧集，请尝试其他关键词'
         );
       }
     } catch (error) {
@@ -75,7 +75,7 @@ export default function DanmakuPanel({
         setEpisodes(response.bangumi.episodes);
       } else {
         setEpisodes([]);
-        setSearchError('该动漫暂无剧集信息');
+        setSearchError('该剧集暂无弹幕信息');
       }
     } catch (error) {
       console.error('获取剧集失败:', error);
@@ -128,7 +128,7 @@ export default function DanmakuPanel({
 
   return (
     <div className='flex h-full flex-col overflow-hidden'>
-      {/* 搜索区域 */}
+      {/* 搜索区域 - 固定在顶部 */}
       <div className='mb-4 flex-shrink-0'>
         <div className='flex gap-2'>
           <input
@@ -140,7 +140,7 @@ export default function DanmakuPanel({
                 handleSearch(searchKeyword);
               }
             }}
-            placeholder='输入动漫名称搜索弹幕...'
+            placeholder='输入剧集名称搜索弹幕...'
             autoComplete='off'
             autoCorrect='off'
             autoCapitalize='off'
@@ -174,10 +174,23 @@ export default function DanmakuPanel({
           </button>
         </div>
 
+        {/* 错误提示 */}
+        {searchError && (
+          <div
+            className='mt-3 rounded-lg border border-red-500/30 bg-red-500/10
+                        px-3 py-2 text-sm text-red-600 dark:text-red-400'
+          >
+            {searchError}
+          </div>
+        )}
+      </div>
+
+      {/* 可滚动内容区域 */}
+      <div className='flex-1 overflow-y-auto min-h-0'>
         {/* 当前选择的弹幕信息 */}
         {currentSelection && (
           <div
-            className='mt-3 rounded-lg border border-green-500/30 bg-green-500/10
+            className='mb-4 rounded-lg border border-green-500/30 bg-green-500/10
                         px-3 py-2 text-sm'
           >
             <p className='font-semibold text-green-600 dark:text-green-400'>
@@ -192,19 +205,8 @@ export default function DanmakuPanel({
           </div>
         )}
 
-        {/* 错误提示 */}
-        {searchError && (
-          <div
-            className='mt-3 rounded-lg border border-red-500/30 bg-red-500/10
-                        px-3 py-2 text-sm text-red-600 dark:text-red-400'
-          >
-            {searchError}
-          </div>
-        )}
-      </div>
-
-      {/* 内容区域 */}
-      <div className='flex-1 overflow-y-auto min-h-0'>
+        {/* 内容区域 */}
+        <div>
         {/* 显示剧集列表 */}
         {selectedAnime && (
           <div className='space-y-2'>
@@ -361,10 +363,11 @@ export default function DanmakuPanel({
           <div className='flex flex-col items-center justify-center py-12 text-center'>
             <MagnifyingGlassIcon className='mb-3 h-12 w-12 text-gray-400' />
             <p className='text-sm text-gray-500 dark:text-gray-400'>
-              输入动漫名称搜索弹幕
+              输入剧集名称搜索弹幕
             </p>
           </div>
         )}
+        </div>
       </div>
     </div>
   );

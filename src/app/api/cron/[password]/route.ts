@@ -11,8 +11,20 @@ import { SearchResult } from '@/lib/types';
 
 export const runtime = 'nodejs';
 
-export async function GET(request: NextRequest) {
+export async function GET(
+  request: NextRequest,
+  { params }: { params: { password: string } }
+) {
   console.log(request.url);
+
+  const cronPassword = process.env.CRON_PASSWORD || 'mtvpls';
+  if (params.password !== cronPassword) {
+    return NextResponse.json(
+      { success: false, message: 'Unauthorized' },
+      { status: 401 }
+    );
+  }
+
   try {
     console.log('Cron job triggered:', new Date().toISOString());
 

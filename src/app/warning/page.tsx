@@ -52,7 +52,7 @@ export default function WarningPage() {
               📢 重要更新说明
             </p>
             <p className='text-sm sm:text-base text-blue-700'>
-              自 v200.5.0 版本起，已不再支持无数据库部署方式，请配置数据库相关环境变量。
+              自 v205.0.0 版本起，已不再支持无数据库部署方式，请配置数据库相关环境变量。
             </p>
           </div>
 

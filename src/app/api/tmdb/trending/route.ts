@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 import { NextResponse } from 'next/server';
-import { getTMDBTrendingContent } from '@/lib/tmdb.client';
+import { getTMDBTrendingContent, getTMDBVideos } from '@/lib/tmdb.client';
 import { getConfig } from '@/lib/config';
 
 // 缓存配置 - 服务器内存缓存3小时
@@ -54,6 +54,18 @@ export async function GET() {
 
       // 获取热门内容
       result = await getTMDBTrendingContent(apiKey, proxy);
+
+      // 为每个项目获取视频数据
+      if (result.code === 200 && result.list) {
+        const itemsWithVideos = await Promise.all(
+          result.list.map(async (item: any) => {
+            const videoKey = await getTMDBVideos(apiKey, item.media_type, item.id, proxy);
+            return { ...item, video_key: videoKey };
+          })
+        );
+        result.list = itemsWithVideos;
+      }
+
       // 添加数据源标识
       result.source = 'TMDB';
       // 更新TMDB缓存

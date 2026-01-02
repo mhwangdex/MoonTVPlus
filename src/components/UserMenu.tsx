@@ -89,8 +89,8 @@ export const UserMenu: React.FC = () => {
   const [enableOptimization, setEnableOptimization] = useState(true);
   const [fluidSearch, setFluidSearch] = useState(true);
   const [liveDirectConnect, setLiveDirectConnect] = useState(false);
-  const [danmakuHeatmapDisabled, setDanmakuHeatmapDisabled] = useState(false);
   const [tmdbBackdropDisabled, setTmdbBackdropDisabled] = useState(false);
+  const [enableTrailers, setEnableTrailers] = useState(false);
   const [doubanDataSource, setDoubanDataSource] = useState('cmliussss-cdn-tencent');
   const [doubanImageProxyType, setDoubanImageProxyType] = useState('cmliussss-cdn-tencent');
   const [doubanImageProxyUrl, setDoubanImageProxyUrl] = useState('');
@@ -317,14 +317,14 @@ export const UserMenu: React.FC = () => {
         setLiveDirectConnect(JSON.parse(savedLiveDirectConnect));
       }
 
-      const savedDanmakuHeatmapDisabled = localStorage.getItem('danmaku_heatmap_disabled');
-      if (savedDanmakuHeatmapDisabled !== null) {
-        setDanmakuHeatmapDisabled(savedDanmakuHeatmapDisabled === 'true');
-      }
-
       const savedTmdbBackdropDisabled = localStorage.getItem('tmdb_backdrop_disabled');
       if (savedTmdbBackdropDisabled !== null) {
         setTmdbBackdropDisabled(savedTmdbBackdropDisabled === 'true');
+      }
+
+      const savedEnableTrailers = localStorage.getItem('enableTrailers');
+      if (savedEnableTrailers !== null) {
+        setEnableTrailers(savedEnableTrailers === 'true');
       }
 
       const savedBufferStrategy = localStorage.getItem('bufferStrategy');
@@ -550,17 +550,17 @@ export const UserMenu: React.FC = () => {
     }
   };
 
-  const handleDanmakuHeatmapDisabledToggle = (value: boolean) => {
-    setDanmakuHeatmapDisabled(value);
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('danmaku_heatmap_disabled', String(value));
-    }
-  };
-
   const handleTmdbBackdropDisabledToggle = (value: boolean) => {
     setTmdbBackdropDisabled(value);
     if (typeof window !== 'undefined') {
       localStorage.setItem('tmdb_backdrop_disabled', String(value));
+    }
+  };
+
+  const handleEnableTrailersToggle = (value: boolean) => {
+    setEnableTrailers(value);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('enableTrailers', String(value));
     }
   };
 
@@ -634,7 +634,8 @@ export const UserMenu: React.FC = () => {
     setEnableOptimization(true);
     setFluidSearch(defaultFluidSearch);
     setLiveDirectConnect(false);
-    setDanmakuHeatmapDisabled(false);
+    setTmdbBackdropDisabled(false);
+    setEnableTrailers(false);
     setDoubanProxyUrl(defaultDoubanProxy);
     setDoubanDataSource(defaultDoubanProxyType);
     setDoubanImageProxyType(defaultDoubanImageProxyType);
@@ -647,7 +648,8 @@ export const UserMenu: React.FC = () => {
       localStorage.setItem('enableOptimization', JSON.stringify(true));
       localStorage.setItem('fluidSearch', JSON.stringify(defaultFluidSearch));
       localStorage.setItem('liveDirectConnect', JSON.stringify(false));
-      localStorage.setItem('danmaku_heatmap_disabled', 'false');
+      localStorage.setItem('tmdb_backdrop_disabled', 'false');
+      localStorage.setItem('enableTrailers', 'false');
       localStorage.setItem('doubanProxyUrl', defaultDoubanProxy);
       localStorage.setItem('doubanDataSource', defaultDoubanProxyType);
       localStorage.setItem('doubanImageProxyType', defaultDoubanImageProxyType);
@@ -1250,29 +1252,6 @@ export const UserMenu: React.FC = () => {
             </div>
 
             {/* 禁用弹幕热力 */}
-            <div className='flex items-center justify-between'>
-              <div>
-                <h4 className='text-sm font-medium text-gray-700 dark:text-gray-300'>
-                  禁用弹幕热力图
-                </h4>
-                <p className='text-xs text-gray-500 dark:text-gray-400 mt-1'>
-                  完全关闭弹幕热力图功能以提升性能（需手动刷新页面生效）
-                </p>
-              </div>
-              <label className='flex items-center cursor-pointer'>
-                <div className='relative'>
-                  <input
-                    type='checkbox'
-                    className='sr-only peer'
-                    checked={danmakuHeatmapDisabled}
-                    onChange={(e) => handleDanmakuHeatmapDisabledToggle(e.target.checked)}
-                  />
-                  <div className='w-11 h-6 bg-gray-300 rounded-full peer-checked:bg-green-500 transition-colors dark:bg-gray-600'></div>
-                  <div className='absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-transform peer-checked:translate-x-5'></div>
-                </div>
-              </label>
-            </div>
-
             {/* 禁用背景图渲染 */}
             <div className='flex items-center justify-between'>
               <div>
@@ -1290,6 +1269,30 @@ export const UserMenu: React.FC = () => {
                     className='sr-only peer'
                     checked={tmdbBackdropDisabled}
                     onChange={(e) => handleTmdbBackdropDisabledToggle(e.target.checked)}
+                  />
+                  <div className='w-11 h-6 bg-gray-300 rounded-full peer-checked:bg-green-500 transition-colors dark:bg-gray-600'></div>
+                  <div className='absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-transform peer-checked:translate-x-5'></div>
+                </div>
+              </label>
+            </div>
+
+            {/* 启用预告片 */}
+            <div className='flex items-center justify-between'>
+              <div>
+                <h4 className='text-sm font-medium text-gray-700 dark:text-gray-300'>
+                  首页预告片
+                </h4>
+                <p className='text-xs text-gray-500 dark:text-gray-400 mt-1'>
+                  在首页轮播图中显示视频预告片（需刷新页面生效）
+                </p>
+              </div>
+              <label className='flex items-center cursor-pointer'>
+                <div className='relative'>
+                  <input
+                    type='checkbox'
+                    className='sr-only peer'
+                    checked={enableTrailers}
+                    onChange={(e) => handleEnableTrailersToggle(e.target.checked)}
                   />
                   <div className='w-11 h-6 bg-gray-300 rounded-full peer-checked:bg-green-500 transition-colors dark:bg-gray-600'></div>
                   <div className='absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-transform peer-checked:translate-x-5'></div>

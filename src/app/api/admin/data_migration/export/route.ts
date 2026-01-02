@@ -61,23 +61,39 @@ export async function POST(req: NextRequest) {
     };
 
     // 获取所有V2用户
-    const usersV2Result = await db.getUserListV2(0, 10000, process.env.USERNAME);
+    const usersV2Result = await db.getUserListV2(0, 1000000, process.env.USERNAME);
     exportData.data.usersV2 = usersV2Result.users;
+    console.log(`从getUserListV2获取到 ${usersV2Result.users.length} 个用户`);
 
-    // 获取所有用户（包括旧版用户）
+    // 获取所有用户（getAllUsers返回的是V2用户）
     let allUsers = await db.getAllUsers();
-    // 添加站长用户
-    allUsers.push(process.env.USERNAME);
-    // 添加V2用户
+    allUsers.push(process.env.USERNAME); // 添加站长
+    // 添加V2用户列表中的用户
     usersV2Result.users.forEach(user => {
       if (!allUsers.includes(user.username)) {
         allUsers.push(user.username);
       }
     });
     allUsers = Array.from(new Set(allUsers));
+    console.log(`准备导出 ${allUsers.length} 个V2用户（包括站长）`);
 
-    // 为每个用户收集数据
+    // 为每个用户收集数据（只导出V2用户）
+    let exportedCount = 0;
     for (const username of allUsers) {
+      // 站长特殊处理：使用环境变量密码
+      let finalPasswordV2 = username === process.env.USERNAME ? process.env.PASSWORD : null;
+
+      // 如果不是站长，获取V2密码
+      if (!finalPasswordV2) {
+        finalPasswordV2 = await getUserPasswordV2(username);
+      }
+
+      // 跳过没有V2密码的用户
+      if (!finalPasswordV2) {
+        console.log(`跳过用户 ${username}：没有V2密码`);
+        continue;
+      }
+
       const userData = {
         // 播放记录
         playRecords: await db.getAllPlayRecords(username),
@@ -87,17 +103,15 @@ export async function POST(req: NextRequest) {
         searchHistory: await db.getSearchHistory(username),
         // 跳过片头片尾配置
         skipConfigs: await db.getAllSkipConfigs(username),
-        // 用户密码（通过验证空密码来检查用户是否存在，然后获取密码）
-        password: await getUserPassword(username),
         // V2用户的加密密码
-        passwordV2: await getUserPasswordV2(username)
+        passwordV2: finalPasswordV2
       };
 
       exportData.data.userData[username] = userData;
+      exportedCount++;
     }
 
-    // 覆盖站长密码
-    exportData.data.userData[process.env.USERNAME].password = process.env.PASSWORD;
+    console.log(`成功导出 ${exportedCount} 个用户的数据`);
 
     // 将数据转换为JSON字符串
     const jsonData = JSON.stringify(exportData);
@@ -132,32 +146,22 @@ export async function POST(req: NextRequest) {
   }
 }
 
-// 辅助函数：获取用户密码（通过数据库直接访问）
-async function getUserPassword(username: string): Promise<string | null> {
-  try {
-    // 使用 Redis 存储的直接访问方法
-    const storage = (db as any).storage;
-    if (storage && typeof storage.client?.get === 'function') {
-      const passwordKey = `u:${username}:pwd`;
-      const password = await storage.client.get(passwordKey);
-      return password;
-    }
-    return null;
-  } catch (error) {
-    console.error(`获取用户 ${username} 密码失败:`, error);
-    return null;
-  }
-}
-
 // 辅助函数：获取V2用户的加密密码
 async function getUserPasswordV2(username: string): Promise<string | null> {
   try {
     const storage = (db as any).storage;
-    if (storage && typeof storage.client?.hget === 'function') {
-      const userInfoKey = `user:${username}:info`;
-      const password = await storage.client.hget(userInfoKey, 'password');
-      return password;
+    if (!storage) return null;
+
+    // 直接调用hGetAll获取完整用户信息（包括密码）
+    const userInfoKey = `user:${username}:info`;
+
+    if (typeof storage.withRetry === 'function' && storage.client?.hGetAll) {
+      const userInfo = await storage.withRetry(() => storage.client.hGetAll(userInfoKey));
+      if (userInfo && userInfo.password) {
+        return userInfo.password;
+      }
     }
+
     return null;
   } catch (error) {
     console.error(`获取用户 ${username} V2密码失败:`, error);

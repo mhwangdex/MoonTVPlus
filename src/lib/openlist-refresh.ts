@@ -19,6 +19,7 @@ import {
 } from '@/lib/scan-task';
 import { parseSeasonFromTitle } from '@/lib/season-parser';
 import { searchTMDB, getTVSeasonDetails } from '@/lib/tmdb.search';
+import parseTorrentName from 'parse-torrent-name';
 
 /**
  * 启动 OpenList 刷新任务
@@ -55,7 +56,8 @@ export async function startOpenListRefresh(clearMetaInfo: boolean = false): Prom
     tmdbProxy,
     openListConfig.Username,
     openListConfig.Password,
-    clearMetaInfo
+    clearMetaInfo,
+    openListConfig.ScanMode || 'hybrid'
   ).catch((error) => {
     console.error('[OpenList Refresh] 后台扫描失败:', error);
     failScanTask(taskId, (error as Error).message);
@@ -75,7 +77,8 @@ async function performScan(
   tmdbProxy?: string,
   username?: string,
   password?: string,
-  clearMetaInfo?: boolean
+  clearMetaInfo?: boolean,
+  scanMode: 'torrent' | 'name' | 'hybrid' = 'hybrid'
 ): Promise<void> {
   const client = new OpenListClient(url, username!, password!);
 
@@ -161,18 +164,34 @@ async function performScan(
       existingKeys.add(folderKey);
 
       try {
-        const seasonInfo = parseSeasonFromTitle(folder.name);
-        const searchQuery = seasonInfo.cleanTitle || folder.name;
+        let searchQuery: string;
+        let seasonNumber: number | null = null;
+        let year: number | null = null;
+        let searchResult: any;
 
-        console.log(`[OpenList Refresh] 处理文件夹: ${folder.name}`);
-        console.log(`[OpenList Refresh] 清理后标题: ${searchQuery}, 季度: ${seasonInfo.seasonNumber}, 年份: ${seasonInfo.year}`);
+        if (scanMode === 'torrent' || scanMode === 'hybrid') {
+          const torrentInfo = parseTorrentName(folder.name);
+          searchQuery = torrentInfo.title || folder.name;
+          seasonNumber = torrentInfo.season || null;
+          year = torrentInfo.year || null;
 
-        const searchResult = await searchTMDB(
-          tmdbApiKey,
-          searchQuery,
-          tmdbProxy,
-          seasonInfo.year || undefined
-        );
+          console.log(`[OpenList Refresh] 种子库模式 - 文件夹: ${folder.name}`);
+          console.log(`[OpenList Refresh] 解析结果 - 标题: ${searchQuery}, 季度: ${seasonNumber}, 年份: ${year}`);
+
+          searchResult = await searchTMDB(tmdbApiKey, searchQuery, tmdbProxy, year || undefined);
+        }
+
+        if (scanMode === 'name' || (scanMode === 'hybrid' && (!searchResult || searchResult.code !== 200 || !searchResult.result))) {
+          const seasonInfo = parseSeasonFromTitle(folder.name);
+          searchQuery = seasonInfo.cleanTitle || folder.name;
+          seasonNumber = seasonInfo.seasonNumber;
+          year = seasonInfo.year;
+
+          console.log(`[OpenList Refresh] 名字匹配模式 - 文件夹: ${folder.name}`);
+          console.log(`[OpenList Refresh] 清理后标题: ${searchQuery}, 季度: ${seasonNumber}, 年份: ${year}`);
+
+          searchResult = await searchTMDB(tmdbApiKey, searchQuery, tmdbProxy, year || undefined);
+        }
 
         if (searchResult.code === 200 && searchResult.result) {
           const result = searchResult.result;
@@ -190,12 +209,12 @@ async function performScan(
             failed: false,
           };
 
-          if (result.media_type === 'tv' && seasonInfo.seasonNumber) {
+          if (result.media_type === 'tv' && seasonNumber) {
             try {
               const seasonDetails = await getTVSeasonDetails(
                 tmdbApiKey,
                 result.id,
-                seasonInfo.seasonNumber,
+                seasonNumber,
                 tmdbProxy
               );
 
@@ -217,12 +236,12 @@ async function performScan(
                   folderInfo.release_date = seasonDetails.season.air_date;
                 }
               } else {
-                console.warn(`[OpenList Refresh] 获取季度 ${seasonInfo.seasonNumber} 详情失败`);
-                folderInfo.season_number = seasonInfo.seasonNumber;
+                console.warn(`[OpenList Refresh] 获取季度 ${seasonNumber} 详情失败`);
+                folderInfo.season_number = seasonNumber;
               }
             } catch (error) {
               console.error(`[OpenList Refresh] 获取季度详情异常:`, error);
-              folderInfo.season_number = seasonInfo.seasonNumber;
+              folderInfo.season_number = seasonNumber;
             }
           }
 

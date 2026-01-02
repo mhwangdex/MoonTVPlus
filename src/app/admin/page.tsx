@@ -2766,6 +2766,7 @@ const OpenListConfigComponent = ({
   const [rootPath, setRootPath] = useState('/');
   const [offlineDownloadPath, setOfflineDownloadPath] = useState('/');
   const [scanInterval, setScanInterval] = useState(0);
+  const [scanMode, setScanMode] = useState<'torrent' | 'name' | 'hybrid'>('hybrid');
   const [videos, setVideos] = useState<any[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [scanProgress, setScanProgress] = useState<{
@@ -2785,6 +2786,7 @@ const OpenListConfigComponent = ({
       setRootPath(config.OpenListConfig.RootPath || '/');
       setOfflineDownloadPath(config.OpenListConfig.OfflineDownloadPath || '/');
       setScanInterval(config.OpenListConfig.ScanInterval || 0);
+      setScanMode(config.OpenListConfig.ScanMode || 'hybrid');
     }
   }, [config]);
 
@@ -2825,6 +2827,7 @@ const OpenListConfigComponent = ({
             RootPath: rootPath,
             OfflineDownloadPath: offlineDownloadPath,
             ScanInterval: scanInterval,
+            ScanMode: scanMode,
           }),
         });
 
@@ -3148,6 +3151,25 @@ const OpenListConfigComponent = ({
           />
           <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
             设置为 0 关闭定时扫描，最低 60 分钟
+          </p>
+        </div>
+
+        <div>
+          <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'>
+            扫描模式
+          </label>
+          <select
+            value={scanMode}
+            onChange={(e) => setScanMode(e.target.value as 'torrent' | 'name' | 'hybrid')}
+            disabled={!enabled}
+            className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:opacity-50 disabled:cursor-not-allowed'
+          >
+            <option value='hybrid'>混合模式（推荐）</option>
+            <option value='torrent'>种子库匹配</option>
+            <option value='name'>名字匹配</option>
+          </select>
+          <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
+            混合模式：先用种子库匹配，失败后降级为名字匹配
           </p>
         </div>
 
